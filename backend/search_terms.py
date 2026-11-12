@@ -3,7 +3,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from database import get_connection
+from database import get_connection, db_transaction
 
 EXPANDED_SECTORS = [
     # Construção, Reforma & Acabamento
@@ -83,51 +83,45 @@ EXPANDED_SECTORS = [
 ]
 
 def init_search_terms():
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS search_terms (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        term TEXT UNIQUE NOT NULL,
-        category TEXT NOT NULL,
-        active BOOLEAN DEFAULT 1,
-        total_discovered INTEGER DEFAULT 0,
-        last_run_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    
-    inseridos = 0
-    for s in EXPANDED_SECTORS:
+    with db_transaction() as conn:
+        c = conn.cursor()
         c.execute("""
-        INSERT INTO search_terms (term, category, active)
-        VALUES (:term, :category, 1)
-        ON CONFLICT(term) DO UPDATE SET category = excluded.category
-        """, s)
-        inseridos += 1
+        CREATE TABLE IF NOT EXISTS search_terms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            term TEXT UNIQUE NOT NULL,
+            category TEXT NOT NULL,
+            active BOOLEAN DEFAULT 1,
+            total_discovered INTEGER DEFAULT 0,
+            last_run_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
         
-    conn.commit()
-    conn.close()
-    print(f"[✓] Base expandida com sucesso! {inseridos} setores comerciais de Ribeirão Preto cadastrados.")
+        inseridos = 0
+        for s in EXPANDED_SECTORS:
+            c.execute("""
+            INSERT INTO search_terms (term, category, active)
+            VALUES (:term, :category, 1)
+            ON CONFLICT(term) DO UPDATE SET category = excluded.category
+            """, s)
+            inseridos += 1
+            
+        print(f"[✓] Base expandida com sucesso! {inseridos} setores comerciais de Ribeirão Preto cadastrados.")
 
 def list_search_terms():
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM search_terms ORDER BY id ASC")
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return rows
+    with db_transaction() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM search_terms ORDER BY id ASC")
+        return [dict(r) for r in c.fetchall()]
 
 def add_search_term(term: str, category: str):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-    INSERT INTO search_terms (term, category, active)
-    VALUES (?, ?, 1)
-    ON CONFLICT(term) DO UPDATE SET active = 1, category = excluded.category
-    """, (term.strip(), category.strip()))
-    conn.commit()
-    conn.close()
+    with db_transaction() as conn:
+        c = conn.cursor()
+        c.execute("""
+        INSERT INTO search_terms (term, category, active)
+        VALUES (?, ?, 1)
+        ON CONFLICT(term) DO UPDATE SET active = 1, category = excluded.category
+        """, (term.strip(), category.strip()))
 
 if __name__ == "__main__":
     init_search_terms()

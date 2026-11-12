@@ -6,33 +6,31 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from database import get_connection
+from database import get_connection, db_transaction
 
 def init_discovery_table():
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS discovered_stores (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        category TEXT,
-        neighborhood TEXT,
-        address TEXT,
-        phone TEXT,
-        website TEXT,
-        rating REAL,
-        reviews_count INTEGER,
-        maps_url TEXT,
-        platform TEXT, -- 'tray', 'vtex', 'nuvemshop', 'woocommerce', 'institucional', 'desconhecido'
-        has_ecommerce BOOLEAN DEFAULT 0,
-        status TEXT DEFAULT 'pending', -- 'pending', 'imported', 'ignored'
-        query_used TEXT,
-        discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(name, address)
-    )
-    """)
-    conn.commit()
-    conn.close()
+    with db_transaction() as conn:
+        c = conn.cursor()
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS discovered_stores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT,
+            neighborhood TEXT,
+            address TEXT,
+            phone TEXT,
+            website TEXT,
+            rating REAL,
+            reviews_count INTEGER,
+            maps_url TEXT,
+            platform TEXT, -- 'tray', 'vtex', 'nuvemshop', 'woocommerce', 'institucional', 'desconhecido'
+            has_ecommerce BOOLEAN DEFAULT 0,
+            status TEXT DEFAULT 'pending', -- 'pending', 'imported', 'ignored'
+            query_used TEXT,
+            discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, address)
+        )
+        """)
 
 def parse_neighborhood(address: str) -> str:
     # Ex: R. Bernardino de Campos, 1617 - Centro, Ribeirão Preto - SP, 14015-130
@@ -152,23 +150,21 @@ async def scrape_google_maps_stores(search_query: str, max_results: int = 15):
                         "query_used": search_query
                     }
 
-                    # Salva no banco de dados SQLite com timeout seguro
-                    conn = get_connection()
-                    c = conn.cursor()
-                    c.execute("""
-                    INSERT INTO discovered_stores (
-                        name, category, neighborhood, address, phone, website,
-                        rating, reviews_count, maps_url, query_used
-                    ) VALUES (
-                        :name, :category, :neighborhood, :address, :phone, :website,
-                        :rating, :reviews_count, :maps_url, :query_used
-                    )
-                    ON CONFLICT(name, address) DO UPDATE SET
-                        website = CASE WHEN excluded.website != '' THEN excluded.website ELSE discovered_stores.website END,
-                        phone = CASE WHEN excluded.phone != '' THEN excluded.phone ELSE discovered_stores.phone END
-                    """, store_data)
-                    conn.commit()
-                    conn.close()
+                    # Salva no banco de dados SQLite de forma segura com retry
+                    with db_transaction() as conn:
+                        c = conn.cursor()
+                        c.execute("""
+                        INSERT INTO discovered_stores (
+                            name, category, neighborhood, address, phone, website,
+                            rating, reviews_count, maps_url, query_used
+                        ) VALUES (
+                            :name, :category, :neighborhood, :address, :phone, :website,
+                            :rating, :reviews_count, :maps_url, :query_used
+                        )
+                        ON CONFLICT(name, address) DO UPDATE SET
+                            website = CASE WHEN excluded.website != '' THEN excluded.website ELSE discovered_stores.website END,
+                            phone = CASE WHEN excluded.phone != '' THEN excluded.phone ELSE discovered_stores.phone END
+                        """, store_data)
 
                     discovered.append(store_data)
                     print(f"  [{i+1}/{limit}] {name[:30]} ({neighborhood[:15]}) | Tel: {phone or 'N/A'} | Site: {website or 'Sem site'}")

@@ -8,7 +8,7 @@ import os
 import time
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from database import get_connection
+from database import get_connection, db_transaction
 
 CATEGORY_PRETTY = {
     "informatica": "Informática & Periféricos",
@@ -98,20 +98,20 @@ async def parse_tray_product(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
                             "title": name,
                             "price": price,
                             "image_url": image,
-                            "brand": brand,
+                            "brand": brand or 'Geral',
                             "category": cat_name,
-                            "sku": str(sku),
-                            "description": desc[:1000],
+                            "sku": sku,
+                            "description": desc or name,
                             "product_url": url
                         }
                 except Exception:
                     pass
 
-            # 2. Fallback: Seletores OpenGraph e HTML da Tray
+            # 2. Fallback via tags OpenGraph e seletores Tray
             og_title = soup.find('meta', property='og:title')
-            title = og_title['content'].split(' - RAICROM')[0].strip() if og_title else ''
+            title = og_title['content'].strip() if og_title else ''
             if not title:
-                h1 = soup.find('h1')
+                h1 = soup.find('h1', class_='product-name') or soup.find('h1')
                 title = h1.get_text(strip=True) if h1 else ''
 
             if not title:
@@ -133,7 +133,7 @@ async def parse_tray_product(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
                         price = 0.0
 
             brand_el = soup.find(class_='brand')
-            brand = brand_el.get_text(strip=True) if brand_el else 'Raicrom'
+            brand = brand_el.get_text(strip=True) if brand_el else 'Geral'
 
             sku_el = soup.find(class_='dados-valor')
             sku = sku_el.get_text(strip=True) if sku_el else ''
@@ -155,8 +155,6 @@ async def parse_tray_product(client: httpx.AsyncClient, sem: asyncio.Semaphore, 
 
 async def crawl_tray_full(store_id: str, sitemap_url: str):
     print(f"[*] Iniciando extração 100% COMPLETA para '{store_id}'...")
-    conn = get_connection()
-    cursor = conn.cursor()
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -166,7 +164,6 @@ async def crawl_tray_full(store_id: str, sitemap_url: str):
         all_urls = await fetch_tray_sitemap_urls(client, sitemap_url)
         print(f"[i] Total de URLs no sitemap da {store_id}: {len(all_urls)}")
 
-        # Filtra páginas institucionais / não-produtos
         product_tasks_info = []
         for u in all_urls:
             if any(skip in u for skip in ['/contato', '/login', '/carrinho', '/institucional', '/quem-somos', '/duvidas', '.xml']):
@@ -179,10 +176,7 @@ async def crawl_tray_full(store_id: str, sitemap_url: str):
         total_items = len(product_tasks_info)
         print(f"[!] Coletando catálogo INTEGRAL: {total_items} produtos da loja {store_id} (SEM LIMITES)...")
 
-        # Concorrência rápida de 25 requisições paralelas
         sem = asyncio.Semaphore(25)
-        
-        # Processa em lotes de 200 produtos para salvar e liberar memória
         batch_size = 200
         saved_total = 0
         t0 = time.time()
@@ -192,41 +186,40 @@ async def crawl_tray_full(store_id: str, sitemap_url: str):
             tasks = [parse_tray_product(client, sem, u, dept) for u, dept in batch]
             results = await asyncio.gather(*tasks)
 
-            for r in results:
-                if not r or not r.get("title"):
-                    continue
-                
-                p_id = f"{store_id}_{abs(hash(r['product_url']))}"
-                cursor.execute("""
-                INSERT INTO products (
-                    id, store_id, sku, title, description, price, original_price,
-                    category, brand, image_url, product_url, in_stock, source_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'crawler_tray')
-                ON CONFLICT(id) DO UPDATE SET
-                    price = excluded.price,
-                    image_url = excluded.image_url,
-                    title = excluded.title,
-                    category = excluded.category,
-                    updated_at = CURRENT_TIMESTAMP
-                """, (
-                    p_id, store_id, r["sku"], r["title"], r["description"],
-                    r["price"], r["price"], r["category"], r["brand"], r["image_url"], r["product_url"]
-                ))
-                saved_total += 1
+            # Salva o lote em uma transação ultrarrápida (sem travar conexões)
+            with db_transaction() as conn:
+                cursor = conn.cursor()
+                for r in results:
+                    if not r or not r.get("title"):
+                        continue
+                    
+                    p_id = f"{store_id}_{abs(hash(r['product_url']))}"
+                    cursor.execute("""
+                    INSERT INTO products (
+                        id, store_id, sku, title, description, price, original_price,
+                        category, brand, image_url, product_url, in_stock, source_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'crawler_tray')
+                    ON CONFLICT(id) DO UPDATE SET
+                        price = excluded.price,
+                        image_url = excluded.image_url,
+                        title = excluded.title,
+                        category = excluded.category,
+                        updated_at = CURRENT_TIMESTAMP
+                    """, (
+                        p_id, store_id, r["sku"], r["title"], r["description"],
+                        r["price"], r["price"], r["category"], r["brand"], r["image_url"], r["product_url"]
+                    ))
+                    saved_total += 1
 
-            conn.commit()
             elapsed = time.time() - t0
             pct = (min(i + batch_size, total_items) / total_items) * 100
             print(f"[+] {min(i + batch_size, total_items)}/{total_items} produtos ({pct:.1f}%) processados em {elapsed:.1f}s...")
 
-        conn.close()
         print(f"[✓] FINALIZADO {store_id}: Total de {saved_total} produtos catalogados com sucesso!")
 
 if __name__ == "__main__":
     async def run_all():
-        # Raicrom: 100% dos 2.736 produtos
         await crawl_tray_full("raicrom", "https://www.raicrom.com.br/sitemap.xml")
-        # Dorival: 100% dos 1.169 produtos
         await crawl_tray_full("dorival-autopecas", "https://www.dorivalautopecas.com.br/sitemap.xml")
 
     asyncio.run(run_all())

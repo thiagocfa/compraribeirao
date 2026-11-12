@@ -8,7 +8,7 @@ import os
 import time
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from database import get_connection
+from database import get_connection, db_transaction, execute_with_retry
 from crawlers.vtex_crawler import crawl_vtex_all
 from crawlers.tray_crawler import crawl_tray_full
 
@@ -58,13 +58,11 @@ async def detect_ecommerce_platform(url: str, client: httpx.AsyncClient) -> str:
                 return "vtex"
 
         return "desconhecido"
-    except Exception as e:
+    except Exception:
         return "inacessivel"
 
 async def crawl_loja_integrada(store_id: str, base_url: str, max_products: int = 400):
     print(f"[*] Extraindo produtos Loja Integrada para '{store_id}' ({base_url})...")
-    conn = get_connection()
-    cursor = conn.cursor()
     base = base_url.rstrip('/')
 
     headers = {
@@ -84,7 +82,6 @@ async def crawl_loja_integrada(store_id: str, base_url: str, max_products: int =
         print(f"[i] Extraindo dados de {len(product_urls)} produtos da Loja Integrada...")
 
         sem = asyncio.Semaphore(15)
-        saved = 0
 
         async def parse_item(u):
             async with sem:
@@ -105,7 +102,6 @@ async def crawl_loja_integrada(store_id: str, base_url: str, max_products: int =
                     og_image = soup.find('meta', property='og:image')
                     image_url = og_image['content'] if og_image else ''
 
-                    # Extrai preço
                     price = 0.0
                     m = re.findall(r'R\$\s*([\d\.,]+)', soup.get_text())
                     if m:
@@ -125,29 +121,34 @@ async def crawl_loja_integrada(store_id: str, base_url: str, max_products: int =
                     return None
 
         results = await asyncio.gather(*[parse_item(u) for u in product_urls])
-        for res in results:
-            if not res or not res["title"]:
-                continue
-            
-            p_id = f"{store_id}_{abs(hash(res['product_url']))}"
-            cursor.execute("""
-            INSERT INTO products (
-                id, store_id, title, description, price, original_price,
-                category, brand, image_url, product_url, in_stock, source_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'crawler_loja_integrada')
-            ON CONFLICT(id) DO UPDATE SET
-                price = excluded.price,
-                image_url = excluded.image_url,
-                title = excluded.title,
-                updated_at = CURRENT_TIMESTAMP
-            """, (
-                p_id, store_id, res["title"], res["title"], res["price"], res["price"],
-                "Música & Instrumentos", store_id, res["image_url"], res["product_url"]
-            ))
-            saved += 1
+        valid_items = [r for r in results if r and r.get("title")]
 
-        conn.commit()
-        conn.close()
+        if not valid_items:
+            print(f"[-] Nenhum produto extraído para {store_id}.")
+            return 0
+
+        # Grava em lote rápido com transação protegida contra locks
+        saved = 0
+        with db_transaction() as conn:
+            cursor = conn.cursor()
+            for res in valid_items:
+                p_id = f"{store_id}_{abs(hash(res['product_url']))}"
+                cursor.execute("""
+                INSERT INTO products (
+                    id, store_id, title, description, price, original_price,
+                    category, brand, image_url, product_url, in_stock, source_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'crawler_loja_integrada')
+                ON CONFLICT(id) DO UPDATE SET
+                    price = excluded.price,
+                    image_url = excluded.image_url,
+                    title = excluded.title,
+                    updated_at = CURRENT_TIMESTAMP
+                """, (
+                    p_id, store_id, res["title"], res["title"], res["price"], res["price"],
+                    "Comércio Geral", store_id, res["image_url"], res["product_url"]
+                ))
+                saved += 1
+
         print(f"[✓] Concluído Loja Integrada ({store_id}): {saved} produtos catalogados!")
         return saved
 
@@ -166,20 +167,18 @@ async def process_and_ingest_store(store_data: dict):
     slug = slugify(name)
     store_id = slug
 
-    # Registra loja na tabela oficial 'stores'
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-    INSERT INTO stores (id, name, slug, category, neighborhood, address, city, state, whatsapp, website, platform)
-    VALUES (?, ?, ?, ?, ?, ?, 'Ribeirão Preto', 'SP', ?, ?, 'universal')
-    ON CONFLICT(id) DO UPDATE SET
-        neighborhood = excluded.neighborhood,
-        address = excluded.address,
-        whatsapp = excluded.whatsapp,
-        website = excluded.website
-    """, (store_id, name, slug, category, neighborhood, address, phone.replace('(', '').replace(')', '').replace('-', '').replace(' ', ''), website))
-    conn.commit()
-    conn.close()
+    # Registra loja na tabela oficial 'stores' de forma rápida e segura
+    with db_transaction() as conn:
+        c = conn.cursor()
+        c.execute("""
+        INSERT INTO stores (id, name, slug, category, neighborhood, address, city, state, whatsapp, website, platform)
+        VALUES (?, ?, ?, ?, ?, ?, 'Ribeirão Preto', 'SP', ?, ?, 'universal')
+        ON CONFLICT(id) DO UPDATE SET
+            neighborhood = excluded.neighborhood,
+            address = excluded.address,
+            whatsapp = excluded.whatsapp,
+            website = excluded.website
+        """, (store_id, name, slug, category, neighborhood, address, phone.replace('(', '').replace(')', '').replace('-', '').replace(' ', ''), website))
 
     headers = {"User-Agent": "Mozilla/5.0"}
     async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=10.0) as client:
@@ -197,7 +196,6 @@ async def process_and_ingest_store(store_data: dict):
     elif platform == "loja_integrada":
         saved_count = await crawl_loja_integrada(store_id, website)
     else:
-        # Se for plataforma desconhecida mas tiver sitemap padrão
         print(f"[i] Loja '{name}' usa plataforma '{platform}'. Tentando ingestão via sitemap universal...")
         try:
             saved_count = await crawl_loja_integrada(store_id, website, max_products=100)
@@ -205,20 +203,19 @@ async def process_and_ingest_store(store_data: dict):
             pass
 
     # Marca loja como importada
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE discovered_stores SET status = 'imported', platform = ? WHERE name = ?", (platform, name))
-    conn.commit()
-    conn.close()
+    with db_transaction() as conn:
+        c = conn.cursor()
+        c.execute("UPDATE discovered_stores SET status = 'imported', platform = ? WHERE name = ?", (platform, name))
 
     return saved_count
 
 async def ingest_all_discovered_with_websites():
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM discovered_stores WHERE website IS NOT NULL AND website != '' AND status != 'imported'")
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
+    # Lê as lojas pendentes
+    rows = []
+    with db_transaction() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM discovered_stores WHERE website IS NOT NULL AND website != '' AND status != 'imported'")
+        rows = [dict(r) for r in c.fetchall()]
 
     print(f"\n[*] Encontradas {len(rows)} lojas descobertas com websites para processar...")
     total_new_products = 0
@@ -231,7 +228,7 @@ async def ingest_all_discovered_with_websites():
         except Exception as e:
             print(f"[!] Erro ao processar loja {store['name']}: {e}")
 
-    # Reindexa busca FTS5
+    # Reindexa busca FTS5 se houve novos produtos
     if total_new_products > 0:
         import indexer
         indexer.rebuild_index()
