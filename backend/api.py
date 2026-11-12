@@ -14,7 +14,6 @@ from database import get_connection, db_transaction
 import search_terms
 import crawlers.universal_crawler as universal_crawler
 import time
-from smart_search import smart_search_stores
 
 app = FastAPI(title="CompraRibeirão API", version="1.0.0")
 
@@ -37,20 +36,6 @@ def get_from_cache(key: str, ttl_seconds: int = 300):
 
 def set_in_cache(key: str, data: Any):
     _RAM_CACHE[key] = {"data": data, "time": time.time()}
-
-@app.get("/api/smart-search")
-def smart_search(
-    q: Optional[str] = Query(None, description="Busca inteligente (ex: bateria de carro, ração gato, porcelanato)"),
-    neighborhood: Optional[str] = Query(None, description="Filtrar por bairro"),
-    limit: int = Query(60, description="Limite de lojas retornadas")
-):
-    cache_key = f"smart_{q}_{neighborhood}_{limit}"
-    cached = get_from_cache(cache_key, ttl_seconds=120)
-    if cached:
-        return cached
-    res = smart_search_stores(q=q, neighborhood=neighborhood, limit=limit)
-    set_in_cache(cache_key, res)
-    return res
 
 @app.get("/api/search-terms")
 def get_terms():
