@@ -354,6 +354,41 @@ def build_knowledge_base():
             
             ai_summary = f"Estabelecimento comercial físico localizado no bairro {neighborhood}. Atendimento presencial e consultas via WhatsApp."
 
+        # Se houver inteligência estruturada gerada pela LLM Local, mescla com prioridade máxima
+        try:
+            ai_row = raw_c.execute("""
+                SELECT macro_categoria, subcategoria, especialidades, marcas_detectadas, resumo_inteligente, palavras_chave_busca 
+                FROM store_ai_intelligence 
+                WHERE store_id = ?
+            """, (store_id,)).fetchone()
+
+            if ai_row:
+                macro_cat, sub_cat, ai_specs, ai_brands, ai_resumo, ai_keywords = ai_row
+                if ai_resumo and len(ai_resumo.strip()) > 10:
+                    ai_summary = ai_resumo.strip()
+                
+                if ai_brands:
+                    try:
+                        b_list = json.loads(ai_brands)
+                        if b_list:
+                            top_brands_list = list(dict.fromkeys(b_list + top_brands_list))[:12]
+                    except Exception:
+                        pass
+
+                if ai_keywords:
+                    try:
+                        k_list = json.loads(ai_keywords)
+                        if k_list:
+                            keywords_list = list(dict.fromkeys(k_list + keywords_list))[:50]
+                    except Exception:
+                        pass
+
+                if macro_cat or sub_cat:
+                    cats = [c for c in [sub_cat, macro_cat] if c and c.lower() != 'geral']
+                    top_cats_list = list(dict.fromkeys(cats + top_cats_list))[:8]
+        except Exception:
+            pass
+
         top_categories_str = ", ".join(top_cats_list)
         top_brands_str = ", ".join(top_brands_list)
         keywords_str = ", ".join(keywords_list)
