@@ -56,7 +56,7 @@
         <span class="font-medium">CompraRibeirão • O estoque do comércio de Ribeirão Preto em tempo real</span>
       </div>
       <div id="stats-badge" class="hidden sm:block text-slate-300 font-semibold">
-        Carregando estoque da cidade...
+        +158.000 produtos cadastrados • 710 lojas em 148 bairros de RP
       </div>
     </div>
   </header>
@@ -94,8 +94,8 @@
         <div class="inline-flex items-center gap-1.5 bg-white/20 text-blue-100 text-[11px] font-bold px-2.5 py-0.5 rounded-full mb-2">
           <i class="fa-solid fa-star text-amber-300"></i> Destaque da Semana em Ribeirão Preto
         </div>
-        <h2 id="ad-title" class="text-lg sm:text-xl font-bold leading-snug">Carregando parceiro patrocinado...</h2>
-        <p id="ad-subtitle" class="text-xs text-blue-100 mt-1">Materiais de Construção, Peças Automotivas e Ferramentas a pronta entrega na cidade.</p>
+        <h2 id="ad-title" class="text-lg sm:text-xl font-bold leading-snug">Tintas, Ferramentas e Acabamento com Retirada Hoje</h2>
+        <p id="ad-subtitle" class="text-xs text-blue-100 mt-1">Materiais de Construção, Peças Automotivas e Ferramentas a pronta entrega em Ribeirão Preto.</p>
       </div>
       <a id="ad-link" href="#" target="_blank" class="relative z-10 shrink-0 bg-white text-blue-900 hover:bg-blue-50 font-bold text-xs sm:text-sm px-5 py-2.5 rounded-xl shadow transition-transform active:scale-95 flex items-center gap-2">
         <span>Conhecer Loja</span>
@@ -756,10 +756,15 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-      loadStats();
-      loadAdBanner();
-      loadFilterOptions();
+      // 1. Carrega produtos imediatamente para tela inicial instantânea
       executeSearch();
+
+      // 2. Carrega estatísticas e filtros em segundo plano sem travar a tela
+      setTimeout(() => {
+        loadStats();
+        loadFilterOptions();
+        loadAdBanner();
+      }, 50);
     });
   </script>
 </body>

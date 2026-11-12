@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import sys
 import sqlite3
-from typing import Optional, List
+from typing import Optional, List, Any
 import re
 
 # Garante que o diretório backend esteja no sys.path
@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(__file__))
 from database import get_connection, db_transaction
 import search_terms
 import crawlers.universal_crawler as universal_crawler
+import time
 from smart_search import smart_search_stores
 
 app = FastAPI(title="CompraRibeirão API", version="1.0.0")
@@ -25,13 +26,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Cache em memória para respostas instantâneas (elimina peso de banco de 400MB)
+_RAM_CACHE = {}
+
+def get_from_cache(key: str, ttl_seconds: int = 300):
+    entry = _RAM_CACHE.get(key)
+    if entry and (time.time() - entry["time"] < ttl_seconds):
+        return entry["data"]
+    return None
+
+def set_in_cache(key: str, data: Any):
+    _RAM_CACHE[key] = {"data": data, "time": time.time()}
+
 @app.get("/api/smart-search")
 def smart_search(
     q: Optional[str] = Query(None, description="Busca inteligente (ex: bateria de carro, ração gato, porcelanato)"),
     neighborhood: Optional[str] = Query(None, description="Filtrar por bairro"),
     limit: int = Query(60, description="Limite de lojas retornadas")
 ):
-    return smart_search_stores(q=q, neighborhood=neighborhood, limit=limit)
+    cache_key = f"smart_{q}_{neighborhood}_{limit}"
+    cached = get_from_cache(cache_key, ttl_seconds=120)
+    if cached:
+        return cached
+    res = smart_search_stores(q=q, neighborhood=neighborhood, limit=limit)
+    set_in_cache(cache_key, res)
+    return res
 
 @app.get("/api/search-terms")
 def get_terms():
@@ -70,6 +89,10 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fronten
 
 @app.get("/api/stats")
 def get_stats():
+    cached = get_from_cache("stats", ttl_seconds=300)
+    if cached:
+        return cached
+
     with db_transaction() as conn:
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM products WHERE in_stock = 1")
@@ -81,28 +104,39 @@ def get_stats():
         c.execute("SELECT COUNT(DISTINCT neighborhood) FROM stores WHERE neighborhood IS NOT NULL")
         total_neighborhoods = c.fetchone()[0]
         
-        return {
+        result = {
             "products_count": total_products,
             "stores_count": total_stores,
             "neighborhoods_count": total_neighborhoods,
             "city": "Ribeirão Preto - SP"
         }
+        set_in_cache("stats", result)
+        return result
 
 @app.get("/api/neighborhoods")
 def get_neighborhoods():
+    cached = get_from_cache("neighborhoods", ttl_seconds=600)
+    if cached:
+        return cached
+
     with db_transaction() as conn:
         c = conn.cursor()
         c.execute("""
-        SELECT DISTINCT s.neighborhood 
-        FROM stores s
-        JOIN products p ON s.id = p.store_id
-        WHERE s.neighborhood IS NOT NULL AND s.neighborhood != ''
-        ORDER BY s.neighborhood ASC
+        SELECT DISTINCT neighborhood 
+        FROM stores 
+        WHERE neighborhood IS NOT NULL AND neighborhood != ''
+        ORDER BY neighborhood ASC
         """)
-        return [r[0] for r in c.fetchall()]
+        rows = [r[0] for r in c.fetchall()]
+        set_in_cache("neighborhoods", rows)
+        return rows
 
 @app.get("/api/stores")
 def get_stores():
+    cached = get_from_cache("stores", ttl_seconds=600)
+    if cached:
+        return cached
+
     with db_transaction() as conn:
         c = conn.cursor()
         c.execute("""
@@ -113,17 +147,26 @@ def get_stores():
         HAVING product_count > 0
         ORDER BY s.is_sponsored DESC, s.name ASC
         """)
-        return [dict(r) for r in c.fetchall()]
+        rows = [dict(r) for r in c.fetchall()]
+        set_in_cache("stores", rows)
+        return rows
 
 @app.get("/api/ads")
 def get_ads(position: Optional[str] = None):
+    cache_key = f"ads_{position}"
+    cached = get_from_cache(cache_key, ttl_seconds=600)
+    if cached:
+        return cached
+
     with db_transaction() as conn:
         c = conn.cursor()
         if position:
             c.execute("SELECT * FROM ad_banners WHERE active = 1 AND position = ? ORDER BY id DESC", (position,))
         else:
             c.execute("SELECT * FROM ad_banners WHERE active = 1 ORDER BY id DESC")
-        return [dict(r) for r in c.fetchall()]
+        rows = [dict(r) for r in c.fetchall()]
+        set_in_cache(cache_key, rows)
+        return rows
 
 @app.get("/api/search")
 def search_products(
@@ -135,6 +178,12 @@ def search_products(
     limit: int = 40,
     offset: int = 0
 ):
+    # Se for a busca padrão da home page, usa cache em memória para entrega em 0.001s!
+    is_home_search = not q and not store_id and not neighborhood and min_price is None and max_price is None and offset == 0
+    if is_home_search:
+        cached = get_from_cache("home_search_40", ttl_seconds=300)
+        if cached:
+            return cached
     with db_transaction() as conn:
         c = conn.cursor()
 
@@ -227,7 +276,7 @@ def search_products(
         c.execute(query_sql, params)
         results = [dict(r) for r in c.fetchall()]
 
-        return {
+        response_data = {
             "query": q,
             "total": total_found,
             "count": len(results),
@@ -235,6 +284,11 @@ def search_products(
             "offset": offset,
             "results": results
         }
+
+        if is_home_search:
+            set_in_cache("home_search_40", response_data)
+
+        return response_data
 
 # Serve frontend
 if os.path.exists(FRONTEND_DIR):
