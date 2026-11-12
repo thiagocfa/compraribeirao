@@ -1,13 +1,30 @@
-"""
-Script de Inteligência Local v2.5 - CompraRibeirão
-Condensa o banco bruto (415 MB, 170k produtos + 580 análises de LLM) em um Knowledge Base
-ultraleve (compraribeirao_publico.db, ~2.2 MB).
-Inclui:
-- Higienização total de bairros de Ribeirão Preto (mapeamento de Subsetores, shoppings e acentuação)
-- Extração profunda de vocabulário de estoque (até 450 termos únicos por loja com catálogo)
-- Limpeza de marcas (remove auto-referências do nome da própria loja)
-- Amostragem diversificada de produtos para busca dinâmica
-- Tabela de telemetria de leads (cliques em WhatsApp, Rota GPS e Site) para monetização
+r"""
+================================================================================
+COMPILADOR DO KNOWLEDGE BASE PÚBLICO (backend/build_knowledge_base.py) — v2.5
+================================================================================
+Objetivo:
+  Condensar o banco de dados bruto local ('compraribeirao.db' ~ 415 MB, contendo
+  170.992 produtos raspados, 580 textos institucionais e 580 análises da IA Qwen 2.5)
+  em um banco público ultraleve ('compraribeirao_publico.db' ~ 3.10 MB) pronto para
+  rodar na nuvem gratuita (Render 512 MB RAM) com respostas em < 3 milissegundos.
+
+O que este compilador faz:
+  1. Higienização Geográfica de Ribeirão Preto (função clean_neighborhood_name):
+     - Converte códigos de zoneamento do Google Maps ('Subsetor Sul - 5', 'Subsetor Norte - 1')
+       para os bairros reais correspondentes ('Jardim Califórnia', 'Campos Elísios', etc.).
+     - Unifica acentuações e preserva bairros compostos como 'Parque Ribeirão Preto'.
+  2. Extração Profunda de Vocabulário de Estoque:
+     - Para lojas que possuem e-commerce, extrai até 450 termos únicos de produtos
+       para o índice de busca FTS5 (garantindo que itens específicos como 'parafuso',
+       'sextavado', 'amortecedor', 'disjuntor' sejam encontrados imediatamente).
+  3. Limpeza de Marcas (função filter_valid_brands):
+     - Remove falsas marcas onde a IA repetiu o próprio nome da loja.
+  4. Criação da Tabela de Telemetria ('lead_clicks'):
+     - Prepara o banco público para contabilizar cliques em WhatsApp, Rota GPS e Site.
+
+Como executar:
+  .\venv\Scripts\python backend/build_knowledge_base.py
+================================================================================
 """
 
 import sqlite3

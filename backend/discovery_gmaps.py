@@ -1,3 +1,25 @@
+r"""
+================================================================================
+ROBÔ DE DESCOBERTA NO GOOGLE MAPS (backend/discovery_gmaps.py)
+================================================================================
+Objetivo:
+  Buscar estabelecimentos comerciais físicos de Ribeirão Preto diretamente no
+  Google Maps usando navegador headless (Playwright) a CUSTO ZERO de API.
+
+O que este módulo coleta para cada loja avistada:
+  - Nome oficial da loja no Google Maps
+  - Endereço completo e bairro extraído automaticamente
+  - Telefone comercial / WhatsApp (DDD 16)
+  - Website oficial da empresa (se cadastrado no Google Meu Negócio)
+  - Link direto do pino no Google Maps
+
+Onde os dados são salvos:
+  - Na tabela 'discovered_stores' do banco bruto local ('compraribeirao.db').
+
+Como executar via terminal:
+  .\venv\Scripts\python backend/discovery_gmaps.py "marmoraria ribeirao preto"
+================================================================================
+"""
 import asyncio
 import urllib.parse
 import re
@@ -6,7 +28,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from database import get_connection, db_transaction
+from database import get_connection, db_transaction, RAW_DB_PATH
 
 def init_discovery_table():
     with db_transaction() as conn:

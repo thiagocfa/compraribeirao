@@ -1,41 +1,37 @@
-# 🛒 CompraRibeirão
+# 📍 CompraRibeirão (v2.5)
 
-> **Buscador em tempo real de produtos no comércio físico de Ribeirão Preto - SP.**  
-> Encontre onde tem estoque agora nas lojas físicas da cidade sem precisar ligar ou sair de casa, com contato direto por WhatsApp.
+> **Motor de Busca e Inteligência Comercial do Comércio Físico de Ribeirão Preto - SP.**  
+> Encontre quais lojas físicas da cidade vendem ou consertam o que você precisa hoje, veja a distância até você no mapa e chame direto no WhatsApp (DDD 16) do balcão.
 
 ---
 
-## 📖 Documentação Completa do Projeto
+## 📖 Manual Completo de Manutenção e Arquitetura
 
-Para entender toda a arquitetura, o que cada script faz, o fluxo operacional passo a passo e o modelo de negócio, consulte o documento detalhado:
+Toda a documentação técnica, explicação dos dois bancos de dados (`compraribeirao.db` local vs. `compraribeirao_publico.db` na nuvem) e o guia passo a passo de manutenção estão em:
 
 👉 **[DOCUMENTACAO_DO_PROJETO.md](DOCUMENTACAO_DO_PROJETO.md)**
 
 ---
 
-## ⚡ Status Atual do Catálogo
+## 🚀 Como Operar no Dia a Dia (Windows / 1 Clique)
 
-- **Produtos ativos cadastrados:** +90.000 produtos
-- **Lojas físicas no catálogo:** 314 lojas
-- **Bairros mapeados:** 95 bairros de Ribeirão Preto
-- **Estabelecimentos comerciais descobertos no Google Maps:** +1.000 lojas
+1. **Ligar o Site Localmente (`http://localhost:8000`):**  
+   Dê dois cliques em **`ligar_servidor.bat`**.  
+   *(Dica: No rodapé do site local, clique em **"⚙️ Painel de Controle"** para rodar capturas, IA e deploy direto pelo navegador!)*
 
----
+2. **Abrir o Painel de Controle no Terminal (Captura, IA, Compilação):**  
+   Dê dois cliques em **`executar_pipeline.bat`**.
 
-## 🚀 Como Iniciar com 1 Clique (Windows)
-
-1. **Ligar o Servidor do Site:**  
-   Dê dois cliques no arquivo `ligar_servidor.bat`  
-   Acesse no navegador: **`http://localhost:8000`**
-
-2. **Minerar Lojas e Produtos:**  
-   Dê dois cliques no arquivo `executar_pipeline.bat` (ou execute `python pipeline.py`)
-
-3. **Sincronizar com o GitHub:**  
-   Dê dois cliques no arquivo `sincronizar_nuvem.bat`
+3. **Compilar Banco Leve e Subir para a Nuvem (GitHub / Render):**  
+   Dê dois cliques em **`sincronizar_nuvem.bat`**.
 
 ---
 
-## 🌐 Deploy na Nuvem (Render.com)
+## 📊 Status Atual da Base (v2.5)
 
-O projeto possui um `Dockerfile` pronto para execução contínua gratuita no [Render.com](https://render.com). Conecte este repositório no Render como **Web Service** para ter o site rodando 24/7 com link público próprio.
+- **Lojas físicas indexadas em Ribeirão Preto:** 710 estabelecimentos
+- **Locais mapeados no Google Maps:** 1.037 estabelecimentos
+- **Sites com conteúdo textual extraído e analisado por IA (Qwen 2.5 3B):** 580 lojas
+- **Produtos de referência extraídos de catálogos locais:** 170.992 itens
+- **Bairros padronizados de Ribeirão Preto:** 78 bairros
+- **Tamanho do Banco Público na Nuvem (`compraribeirao_publico.db`):** 3,10 MB (respostas em < 3ms)

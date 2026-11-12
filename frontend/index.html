@@ -398,6 +398,184 @@
     </div>
   </div>
 
+  <!-- MODAL: PAINEL DE CONTROLE E MANUTENÇÃO LOCAL (CAPTURA, IA, COMPILAÇÃO E NUVEM) -->
+  <div id="modal-admin" class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4">
+    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      
+      <!-- Cabeçalho do Painel -->
+      <div class="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-lg shadow">
+            <i class="fa-solid fa-sliders"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-base sm:text-lg font-black">Painel de Controle & Manutenção</h3>
+              <span id="admin-env-badge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Verificando...</span>
+            </div>
+            <p class="text-xs text-slate-400">Gerencie a Captura (Maps + Sites), IA Local (Qwen 2.5), Banco Leve e Publicação na Nuvem</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="loadAdminStatus()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5" title="Atualizar diagnóstico">
+            <i class="fa-solid fa-rotate"></i>
+            <span class="hidden sm:inline">Atualizar</span>
+          </button>
+          <button onclick="toggleModalAdmin()" class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Corpo Rolável do Painel -->
+      <div class="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1 custom-scrollbar bg-slate-50">
+        
+        <!-- Aviso se estiver acessando pela Nuvem (Render) -->
+        <div id="admin-cloud-warning" class="hidden p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+          <i class="fa-solid fa-triangle-exclamation text-amber-600 text-base mt-0.5"></i>
+          <div>
+            <strong>Ambiente em Nuvem Detectado (Modo Somente Leitura):</strong>
+            As etapas pesadas de mineração e IA Local rodam exclusivamente no seu <strong>PC Local (`http://localhost:8000` ou `executar_pipeline.bat`)</strong> para manter o servidor da nuvem ultraleve.
+          </div>
+        </div>
+
+        <!-- 1. DIAGNÓSTICO DAS DUAS CAMADAS -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-[11px] font-bold text-slate-400 uppercase block">1. Maps & Lojas (PC)</span>
+            <span id="diag-stores" class="text-lg font-black text-slate-900 mt-0.5 block">--</span>
+            <span id="diag-discovered" class="text-[11px] text-slate-500">-- avistadas no Maps</span>
+          </div>
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-[11px] font-bold text-slate-400 uppercase block">2. Textos Extraídos</span>
+            <span id="diag-texts" class="text-lg font-black text-blue-600 mt-0.5 block">--</span>
+            <span id="diag-products" class="text-[11px] text-slate-500">-- produtos unitários</span>
+          </div>
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-[11px] font-bold text-slate-400 uppercase block">3. IA Local (Qwen 2.5)</span>
+            <span id="diag-ai" class="text-lg font-black text-purple-600 mt-0.5 block">--</span>
+            <span id="diag-ollama" class="text-[11px] text-slate-500">Ollama: verificando...</span>
+          </div>
+          <div class="bg-white p-3.5 rounded-xl border border-emerald-200 shadow-sm bg-emerald-50/30">
+            <span class="text-[11px] font-bold text-emerald-700 uppercase block">4. Banco Nuvem (Leve)</span>
+            <span id="diag-public-size" class="text-lg font-black text-emerald-700 mt-0.5 block">-- MB</span>
+            <span id="diag-public-info" class="text-[11px] text-emerald-800">-- lojas • -- leads</span>
+          </div>
+        </div>
+
+        <!-- 2. BOTÕES DE OPERAÇÃO POR ETAPA -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          
+          <!-- Etapa 1: Google Maps -->
+          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3">
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-map-location-dot text-blue-600 mr-1"></i> Etapa 1: Captura Google Maps</span>
+                <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">discovery_gmaps.py</span>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">Busca novas lojas físicas de Ribeirão Preto no Google Maps sem custo de API.</p>
+            </div>
+            <div class="flex gap-2">
+              <input id="admin-discover-query" type="text" placeholder="Ex: marmoraria, bicicletaria (vazio = todos)" class="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500" />
+              <button onclick="runAdminStep('discover')" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors shrink-0">
+                Rodar Maps
+              </button>
+            </div>
+          </div>
+
+          <!-- Etapa 2: Captura Textual e Produtos -->
+          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3">
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-spider text-indigo-600 mr-1"></i> Etapa 2: Captura dos Sites Web</span>
+                <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">web_text_crawler.py</span>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">Visita os sites das lojas e salva sempre os dados textuais (títulos, H1/H2, sobre) e produtos.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="runAdminStep('crawl-text', false)" class="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
+                Extrair Textos (Novos)
+              </button>
+              <button onclick="runAdminStep('crawl-text', true)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors" title="Re-visitar todos os sites">
+                Recapturar Todos
+              </button>
+              <button onclick="runAdminStep('scrap', false)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors" title="Extrair produtos de e-commerces">
+                + E-commerces
+              </button>
+            </div>
+          </div>
+
+          <!-- Etapa 3: Inteligência Artificial Local (Qwen 2.5 via Ollama) -->
+          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3">
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-brain text-purple-600 mr-1"></i> Etapa 3: Rodar IA Local (Qwen 2.5)</span>
+                <span class="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-semibold">enrich_with_llm.py</span>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">Analisa os textos capturados com a LLM local (inicia o Ollama sozinho se estiver fechado).</p>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="runAdminStep('enrich-ai', false)" class="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
+                Rodar IA (Lojas Pendentes)
+              </button>
+              <button onclick="runAdminStep('enrich-ai', true)" class="px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-xl transition-colors" title="Reanalisar todas as lojas desde o início com a IA">
+                Re-rodar IA em Todas
+              </button>
+            </div>
+          </div>
+
+          <!-- Etapa 4 e 5: Compilar Banco Leve + Subir para a Nuvem -->
+          <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm flex flex-col justify-between gap-3">
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-cloud-arrow-up text-emerald-600 mr-1"></i> Etapas 4 e 5: Compilar & Subir p/ Nuvem</span>
+                <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-semibold">GitHub &rarr; Render</span>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">Gera o banco leve (`compraribeirao_publico.db` ~3 MB) e publica no GitHub/Render.</p>
+            </div>
+            <div class="flex flex-col gap-2">
+              <div class="flex gap-2">
+                <button onclick="runAdminStep('build-kb', false)" class="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
+                  4. Compilar Banco Leve
+                </button>
+                <button onclick="runAdminStep('deploy', false)" class="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
+                  5. Subir p/ Nuvem (Git Push)
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- BOTÃO MESTRE: ESTEIRA COMPLETA -->
+        <div class="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 p-4 rounded-xl text-white flex flex-col sm:flex-row items-center justify-between gap-3 shadow">
+          <div>
+            <span class="text-xs font-black uppercase tracking-wider text-amber-400 block"><i class="fa-solid fa-bolt mr-1"></i> Automação em 1 Clique</span>
+            <span class="text-xs text-slate-200">Executa em sequência: <strong>Extrair Textos &rarr; Analisar com IA Qwen 2.5 &rarr; Compilar Banco Leve</strong></span>
+          </div>
+          <button onclick="runAdminStep('all', false)" class="w-full sm:w-auto px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow transition-all shrink-0">
+            Rodar Esteira Completa Agora
+          </button>
+        </div>
+
+        <!-- 3. CONSOLE DE LOGS EM TEMPO REAL -->
+        <div class="bg-slate-950 rounded-xl border border-slate-800 p-3.5 text-slate-200 font-mono text-xs">
+          <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <span id="admin-job-dot" class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+              <span id="admin-job-status" class="font-bold text-[11px] text-slate-300">Console de Execução (Pronto)</span>
+            </div>
+            <button id="btn-stop-job" onclick="stopAdminJob()" class="hidden px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[10px] font-bold">
+              <i class="fa-solid fa-stop mr-1"></i> Parar Tarefa
+            </button>
+          </div>
+          <pre id="admin-log-output" class="h-44 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-emerald-400 custom-scrollbar">Clique em qualquer etapa acima para acompanhar a execução em tempo real aqui...</pre>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <!-- FOOTER -->
   <footer class="bg-slate-900 text-slate-400 text-xs py-8 mt-12 border-t border-slate-800">
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -408,8 +586,12 @@
         <span class="font-bold text-white text-sm">CompraRibeirão</span>
         <span class="text-slate-500">| Inteligência comercial para fortalecer o comércio físico de Ribeirão Preto - SP.</span>
       </div>
-      <div>
+      <div class="flex items-center gap-4">
         <span>Feito para o comerciante e consumidor de RP • v2.5</span>
+        <button onclick="toggleModalAdmin()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold transition-colors flex items-center gap-1.5 border border-slate-700">
+          <i class="fa-solid fa-sliders text-blue-400"></i>
+          <span>Painel de Controle</span>
+        </button>
       </div>
     </div>
   </footer>
@@ -1063,11 +1245,144 @@
       }
     }
 
+    // =========================================================================
+    // CONTROLE DO PAINEL DE MANUTENÇÃO LOCAL (/api/admin/*)
+    // =========================================================================
+    let adminPollTimer = null;
+
+    function toggleModalAdmin() {
+      const modal = document.getElementById('modal-admin');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) {
+        loadAdminStatus();
+      } else if (adminPollTimer) {
+        clearInterval(adminPollTimer);
+        adminPollTimer = null;
+      }
+    }
+
+    async function loadAdminStatus() {
+      try {
+        const res = await fetch('/api/admin/status');
+        const data = await res.json();
+        const d = data.diagnostics || {};
+        const job = data.job || {};
+
+        // Badge de Ambiente (PC Local vs Nuvem)
+        const envBadge = document.getElementById('admin-env-badge');
+        const cloudWarn = document.getElementById('admin-cloud-warning');
+        if (data.is_local_pc) {
+          envBadge.innerText = 'PC Local (Operacional)';
+          envBadge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+          cloudWarn.classList.add('hidden');
+        } else {
+          envBadge.innerText = 'Nuvem Render (Leitura)';
+          envBadge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30';
+          cloudWarn.classList.remove('hidden');
+        }
+
+        // Indicadores Numéricos
+        document.getElementById('diag-stores').innerText = `${d.stores_count || 0} lojas`;
+        document.getElementById('diag-discovered').innerText = `${d.discovered_count || 0} avistadas no Maps`;
+        document.getElementById('diag-texts').innerText = `${d.web_text_success || 0} sites (${d.web_text_pending || 0} pend.)`;
+        document.getElementById('diag-products').innerText = `${(d.raw_products_count || 0).toLocaleString('pt-BR')} produtos unitários`;
+        document.getElementById('diag-ai').innerText = `${d.ai_enriched_count || 0} lojas (${d.ai_pending_count || 0} fila)`;
+        document.getElementById('diag-ollama').innerText = d.ollama_online
+          ? `🟢 Ollama (${d.ollama_model}) Online`
+          : `⚪ Ollama (${d.ollama_model}) Auto-Start`;
+        document.getElementById('diag-public-size').innerText = `${d.public_db_size_mb || 0} MB`;
+        document.getElementById('diag-public-info').innerText = `${d.public_stores_count || 0} lojas • ${d.public_leads_count || 0} leads`;
+
+        // Console de Execução em Tempo Real
+        const dot = document.getElementById('admin-job-dot');
+        const statusTxt = document.getElementById('admin-job-status');
+        const stopBtn = document.getElementById('btn-stop-job');
+        const logPre = document.getElementById('admin-log-output');
+
+        if (job.logs && job.logs.length > 0) {
+          logPre.innerText = job.logs.join('\n');
+          logPre.scrollTop = logPre.scrollHeight;
+        }
+
+        if (job.running) {
+          dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping';
+          statusTxt.innerText = `Executando etapa '${job.step}' (iniciada às ${job.started_at})...`;
+          stopBtn.classList.remove('hidden');
+          if (!adminPollTimer) {
+            adminPollTimer = setInterval(loadAdminStatus, 1500);
+          }
+        } else {
+          dot.className = job.exit_code === 0 ? 'w-2.5 h-2.5 rounded-full bg-emerald-400' : 'w-2.5 h-2.5 rounded-full bg-slate-500';
+          statusTxt.innerText = job.step
+            ? `Última etapa: '${job.step}' finalizada às ${job.finished_at || ''} (código ${job.exit_code})`
+            : 'Console de Execução (Pronto)';
+          stopBtn.classList.add('hidden');
+          if (adminPollTimer) {
+            clearInterval(adminPollTimer);
+            adminPollTimer = null;
+            // Atualiza contadores e busca da página principal após término de uma etapa
+            loadStats();
+            loadNeighborhoods();
+            executeSearch();
+          }
+        }
+      } catch (e) {
+        console.error('Erro ao carregar status do painel:', e);
+      }
+    }
+
+    async function runAdminStep(step, force = false) {
+      const queryInput = document.getElementById('admin-discover-query');
+      const queryVal = queryInput ? queryInput.value.trim() : '';
+
+      let msgVal = 'Atualizacao do catalogo inteligente via Painel de Controle';
+      if (step === 'deploy') {
+        const userMsg = prompt('Digite uma descrição para esta atualização na nuvem (ou clique OK para padrão):', msgVal);
+        if (userMsg === null) return;
+        if (userMsg.trim()) msgVal = userMsg.trim();
+      }
+
+      try {
+        const res = await fetch('/api/admin/run-step', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            step: step,
+            query: step === 'discover' ? queryVal : null,
+            force: force,
+            msg: msgVal
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.detail || 'Não foi possível iniciar a etapa.');
+          return;
+        }
+        await loadAdminStatus();
+        if (!adminPollTimer) {
+          adminPollTimer = setInterval(loadAdminStatus, 1500);
+        }
+      } catch (e) {
+        alert('Erro ao comunicar com o servidor local: ' + e.message);
+      }
+    }
+
+    async function stopAdminJob() {
+      try {
+        await fetch('/api/admin/stop-job', { method: 'POST' });
+        await loadAdminStatus();
+      } catch (e) {}
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       initMap();
       loadNeighborhoods();
       loadStats();
       executeSearch();
+      // Permite abrir o painel direto pela URL ?painel=1
+      if (window.location.search.includes('painel=1')) {
+        toggleModalAdmin();
+      }
     });
   </script>
 </body>

@@ -1,24 +1,56 @@
-from fastapi import FastAPI, Query, HTTPException, Body
+"""
+================================================================================
+SERVIDOR WEB & MOTOR DE BUSCA LOCAL (backend/api.py) — Versão 2.5
+================================================================================
+Objetivo:
+  Servir a API rápida (< 3ms) e o Frontend do CompraRibeirão consumindo o banco
+  público compilado ('compraribeirao_publico.db' ~ 3.10 MB), além de expor as
+  rotas administrativas locais ('/api/admin/*') para o Painel de Controle de
+  Manutenção quando executado no computador do desenvolvedor.
+
+Como dar manutenção neste arquivo:
+  1. Dicionário de Sinônimos (SYNONYM_MAP):
+     - Adicione novos termos populares que os moradores de Ribeirão Preto buscam
+       mapeando-os para as categorias/palavras técnicas das lojas.
+  2. Pesos de Relevância FTS5 (função local_search):
+     - A chamada 'bm25(stores_search_fts, 12.0, 10.0, 3.0, 9.0, 8.0, 5.0, 2.0)'
+       define o peso de cada coluna: Nome (12), Categoria (10), Bairro (3),
+       Top Categorias (9), Marcas (8), Palavras-chave (5), Resumo IA (2).
+  3. Raio de Bairros Vizinhos:
+     - Na função local_search, o limite padrão para sugerir lojas de bairros
+       adjacentes é 4.5 km (variável 'dist_km > 4.5').
+  4. Painel de Controle Web (/api/admin/*):
+     - Só permite disparar capturas, IA e deploy se o arquivo 'compraribeirao.db'
+       existir na máquina (ou seja, bloqueado automaticamente na nuvem Render).
+================================================================================
+"""
+
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import sys
-import sqlite3
 import json
 import urllib.parse
 import math
 import unicodedata
+import subprocess
+import threading
 from typing import Optional, List, Any, Dict
 import re
 import time
 
-# Garante que o diretório backend esteja no sys.path
-sys.path.append(os.path.dirname(__file__))
-from database import get_connection, db_transaction, DB_PATH, PUBLIC_DB_PATH, RAW_DB_PATH
+# Garante que o diretório backend e a raiz estejam no sys.path
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(BACKEND_DIR)
+sys.path.append(BACKEND_DIR)
+sys.path.append(ROOT_DIR)
+
+from database import db_transaction, PUBLIC_DB_PATH, RAW_DB_PATH
 from build_knowledge_base import NEIGHBORHOOD_COORDS, CITY_CENTROID
-import search_terms
+from run_pipeline import get_system_diagnostics
 
 app = FastAPI(title="CompraRibeirão - Inteligência Comercial Local", version="2.5.0")
 
@@ -30,35 +62,57 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
 
-# Cache em memória para respostas instantâneas
-_RAM_CACHE = {}
+# ==============================================================================
+# 1. CACHE EM MEMÓRIA RAM (Respostas em < 1ms para buscas repetidas)
+# ==============================================================================
+_RAM_CACHE: Dict[str, Dict[str, Any]] = {}
+
 
 def get_from_cache(key: str, ttl_seconds: int = 180):
+    """Retorna um valor do cache em memória se ainda estiver dentro do tempo de vida (TTL)."""
     entry = _RAM_CACHE.get(key)
     if entry and (time.time() - entry["time"] < ttl_seconds):
         return entry["data"]
     return None
 
+
 def set_in_cache(key: str, data: Any):
+    """Armazena um resultado no cache em memória."""
     _RAM_CACHE[key] = {"data": data, "time": time.time()}
 
+
+def clear_all_cache():
+    """Limpa todo o cache em memória (chamado automaticamente após recompilar o banco)."""
+    _RAM_CACHE.clear()
+
+
+# ==============================================================================
+# 2. FUNÇÕES UTILITÁRIAS DE TEXTO, GEOLOCALIZAÇÃO E SINÔNIMOS
+# ==============================================================================
 def strip_accents(text: str) -> str:
+    """Remove acentos de uma string para comparações insensíveis a acentuação."""
     if not text:
         return ""
     return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
 
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calcula a distância física real em km entre dois pontos em Ribeirão Preto."""
-    R = 6371.0
+    """
+    Calcula a distância física real em linha reta (km) entre duas coordenadas GPS
+    usando a fórmula trigonométrica de Haversine.
+    """
+    R = 6371.0  # Raio médio da Terra em km
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
     return 2.0 * R * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
 
-# Dicionário Semântico de Intenções e Sinônimos do Comércio Físico de Ribeirão Preto
+
+# Dicionário Semântico de Intenções e Sinônimos do Comércio Físico de Ribeirão Preto.
+# Para adicionar novos sinônimos, basta incluir uma chave (sem acento) e a lista de termos correlatos.
 SYNONYM_MAP: Dict[str, List[str]] = {
     "carro": ["automotivo", "automotiva", "autopecas", "pecas", "oficina"],
     "veiculo": ["automotivo", "autopecas", "pecas"],
@@ -118,6 +172,7 @@ SYNONYM_MAP: Dict[str, List[str]] = {
     "fogao": ["eletrodomesticos", "cozinha"]
 }
 
+# Palavras de ligação e verbos de intenção que devem ser ignorados como filtro obrigatório
 INTENT_STOPWORDS = {
     "de", "da", "do", "das", "dos", "para", "com", "em", "no", "na", "nos", "nas",
     "por", "sem", "ou", "e", "a", "o", "as", "os", "um", "uma", "ribeirao", "preto",
@@ -126,8 +181,9 @@ INTENT_STOPWORDS = {
     "arrumar", "trocar", "troca", "manutencao", "instalacao", "instalar", "fazer"
 }
 
+
 def stem_pt(word: str) -> str:
-    """Reduz plural simples em português para melhorar prefix-match no FTS5."""
+    """Reduz plural simples em português para melhorar o prefix-match no índice FTS5."""
     w = strip_accents(word.lower().strip())
     if len(w) <= 3:
         return w
@@ -143,10 +199,12 @@ def stem_pt(word: str) -> str:
         return w[:-1]
     return w
 
+
 def expand_search_query(raw_query: str):
     """
-    Extrai os termos centrais da busca do usuário e expande com sinônimos comerciais.
-    Retorna (core_words, expanded_words).
+    Extrai os termos centrais da busca do usuário (removendo verbos como 'consertar', 'comprar')
+    e expande com radicais e sinônimos comerciais do SYNONYM_MAP.
+    Retorna a tupla (core_words, expanded_words).
     """
     norm_q = strip_accents(raw_query.lower())
     tokens = re.findall(r"[a-z0-9]{2,}", norm_q)
@@ -155,7 +213,6 @@ def expand_search_query(raw_query: str):
         core_words = [t for t in tokens if len(t) > 1]
 
     expanded = []
-    # Se o usuário digitou termos de reparo/conserto, adiciona assistência/oficina como expansão secundária
     if any(k in tokens for k in ("consertar", "conserto", "arrumar", "manutencao", "assistencia", "reparo")):
         expanded.extend(["assistencia", "conserto", "manutencao", "oficina"])
 
@@ -165,7 +222,6 @@ def expand_search_query(raw_query: str):
             expanded.append(w)
         if stem != w and len(stem) >= 3 and stem not in expanded:
             expanded.append(stem)
-        # Busca sinônimos diretos ou pelo radical
         for syn_key, syn_list in SYNONYM_MAP.items():
             if w == syn_key or stem == syn_key or (len(stem) >= 4 and syn_key.startswith(stem)):
                 for s in syn_list:
@@ -174,8 +230,9 @@ def expand_search_query(raw_query: str):
 
     return core_words, expanded
 
+
 def format_whatsapp_url(phone: str, store_name: str, query: Optional[str] = None) -> str:
-    """Gera link direto para WhatsApp com mensagem personalizada."""
+    """Formata o link oficial wa.me com DDD 55 e mensagem contextualizada com o produto buscado."""
     if not phone:
         return ""
     clean_digits = re.sub(r"\D", "", phone)
@@ -183,39 +240,46 @@ def format_whatsapp_url(phone: str, store_name: str, query: Optional[str] = None
         return ""
     if not clean_digits.startswith("55"):
         clean_digits = "55" + clean_digits
-    
+
     if query and query.strip():
         msg = f"Olá! Vi a loja *{store_name}* no CompraRibeirão e gostaria de saber se vocês têm ou trabalham com *{query.strip()}*."
     else:
         msg = f"Olá! Vi a loja *{store_name}* no CompraRibeirão e gostaria de um atendimento."
-    
+
     encoded_msg = urllib.parse.quote(msg)
     return f"https://wa.me/{clean_digits}?text={encoded_msg}"
 
+
+# ==============================================================================
+# 3. ROTAS PÚBLICAS DO SITE (Consomem SEMPRE o banco leve PUBLIC_DB_PATH)
+# ==============================================================================
 @app.get("/api/health")
 def health_check():
+    """Rota de verificação de saúde para monitoramento do Render."""
     return {"status": "ok", "service": "CompraRibeirão Local Commerce Engine", "version": "2.5.0"}
+
 
 @app.get("/api/stats")
 def get_stats():
+    """Retorna os contadores gerais exibidos no topo da plataforma."""
     cached = get_from_cache("stats_v25", ttl_seconds=300)
     if cached:
         return cached
 
-    with db_transaction() as conn:
+    with db_transaction(PUBLIC_DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM stores")
         total_stores = c.fetchone()[0]
-        
+
         c.execute("SELECT COUNT(DISTINCT neighborhood) FROM stores WHERE neighborhood IS NOT NULL AND neighborhood != ''")
         total_neighborhoods = c.fetchone()[0]
-        
+
         try:
             c.execute("SELECT COUNT(*) FROM stores WHERE has_catalog = 1")
             with_catalog = c.fetchone()[0]
         except Exception:
             with_catalog = 0
-            
+
         result = {
             "stores_count": total_stores,
             "neighborhoods_count": total_neighborhoods,
@@ -226,13 +290,15 @@ def get_stats():
         set_in_cache("stats_v25", result)
         return result
 
+
 @app.get("/api/neighborhoods")
 def get_neighborhoods():
+    """Retorna a lista de bairros padronizados de Ribeirão Preto com contagem de lojas e coordenadas."""
     cached = get_from_cache("neighborhoods_v25", ttl_seconds=600)
     if cached:
         return cached
 
-    with db_transaction() as conn:
+    with db_transaction(PUBLIC_DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
         SELECT neighborhood, COUNT(*) as store_count, AVG(latitude) as avg_lat, AVG(longitude) as avg_lng
@@ -254,8 +320,10 @@ def get_neighborhoods():
         set_in_cache("neighborhoods_v25", rows)
         return rows
 
+
 @app.get("/api/categories")
 def get_categories():
+    """Retorna os botões de setores rápidos exibidos abaixo da barra de pesquisa."""
     cached = get_from_cache("categories_list_v25", ttl_seconds=600)
     if cached:
         return cached
@@ -277,14 +345,16 @@ def get_categories():
     set_in_cache("categories_list_v25", popular_categories)
     return popular_categories
 
+
 @app.get("/api/ads")
 def get_ads(position: Optional[str] = None):
+    """Retorna os banners patrocinados ativos."""
     cache_key = f"ads_{position}"
     cached = get_from_cache(cache_key, ttl_seconds=600)
     if cached:
         return cached
 
-    with db_transaction() as conn:
+    with db_transaction(PUBLIC_DB_PATH) as conn:
         c = conn.cursor()
         try:
             if position:
@@ -294,22 +364,24 @@ def get_ads(position: Optional[str] = None):
             rows = [dict(r) for r in c.fetchall()]
         except Exception:
             rows = []
-            
+
         set_in_cache(cache_key, rows)
         return rows
+
 
 class LeadClickPayload(BaseModel):
     store_id: str
     store_name: Optional[str] = ""
-    action_type: str = "whatsapp" # 'whatsapp', 'gps', 'website', 'map'
+    action_type: str = "whatsapp"  # 'whatsapp', 'gps', 'website', 'map'
     search_query: Optional[str] = ""
     neighborhood: Optional[str] = ""
+
 
 @app.post("/api/track-lead")
 def track_lead(payload: LeadClickPayload):
     """Registra cliques em WhatsApp, Rota GPS e Site para comprovação de retorno (ROI) aos lojistas."""
     try:
-        with db_transaction() as conn:
+        with db_transaction(PUBLIC_DB_PATH) as conn:
             c = conn.cursor()
             c.execute("""
             INSERT INTO lead_clicks (store_id, store_name, action_type, search_query, neighborhood_filter)
@@ -325,10 +397,11 @@ def track_lead(payload: LeadClickPayload):
     except Exception as e:
         return {"status": "ignored", "detail": str(e)}
 
+
 @app.get("/api/leads-report")
 def get_leads_report():
     """Relatório de inteligência comercial e conversão de leads por loja e termo buscado."""
-    with db_transaction() as conn:
+    with db_transaction(PUBLIC_DB_PATH) as conn:
         c = conn.cursor()
         try:
             top_stores = c.execute("""
@@ -353,6 +426,7 @@ def get_leads_report():
         except Exception:
             return {"top_stores": [], "top_queries": []}
 
+
 @app.get("/api/local-search")
 def local_search(
     q: Optional[str] = Query(None, description="O que você procura em Ribeirão Preto (ex: makita, embreagem, porcelanato, piscina, bateria)"),
@@ -366,9 +440,9 @@ def local_search(
     """
     Motor de Busca Híbrido v2.5 para o Comércio Físico de Ribeirão Preto:
     1. Expansão Semântica de Intenção e Sinônimos (Português BR).
-    2. FTS5 com pesos BM25 por coluna + Classificação em 2 Camadas (Match Exato > Match Semântico).
-    3. Cálculo de Distância Geográfica (Haversine) por GPS do usuário ou centróide do bairro.
-    4. Evidências visuais de match ('Por que indicamos esta loja') e filtro dinâmico de produtos de amostra.
+    2. FTS5 com pesos BM25 por coluna + Classificação em 3 Camadas (Tier 1 Exato > Tier 2 Parcial > Tier 3 Setor).
+    3. Cálculo de Distância Geográfica (Haversine) por GPS do usuário ou centroide do bairro.
+    4. Evidências visuais de match ('match_reasons') e filtro dinâmico de produtos de amostra.
     """
     lat_key = f"{user_lat:.3f}_{user_lng:.3f}" if (user_lat is not None and user_lng is not None) else "none"
     cache_key = f"local_search_v25_{q}_{neighborhood}_{lat_key}_{include_nearby}_{limit}_{offset}"
@@ -376,7 +450,7 @@ def local_search(
     if cached:
         return cached
 
-    # Determinar ponto de referência geográfico (GPS do usuário OU centróide do bairro selecionado)
+    # Determinar ponto de referência geográfico (GPS do usuário OU centroide do bairro selecionado)
     ref_lat, ref_lng = user_lat, user_lng
     clean_neigh = neighborhood.strip() if neighborhood else ""
     if (ref_lat is None or ref_lng is None) and clean_neigh:
@@ -386,7 +460,7 @@ def local_search(
                 ref_lat, ref_lng = coords[0], coords[1]
                 break
 
-    with db_transaction() as conn:
+    with db_transaction(PUBLIC_DB_PATH) as conn:
         c = conn.cursor()
 
         has_query = bool(q and q.strip())
@@ -394,7 +468,6 @@ def local_search(
 
         if has_query:
             core_words, expanded_words = expand_search_query(q.strip())
-            # Construir query FTS5 abrangente com OR para resgatar todos os candidatos relevantes
             fts_terms = []
             for w in expanded_words:
                 w_clean = re.sub(r"[^a-zA-Z0-9]", "", w)
@@ -416,35 +489,29 @@ def local_search(
             except Exception:
                 candidate_rows = []
         else:
-            # Sem termo de busca: traz todas as lojas (ou do bairro)
             if clean_neigh:
                 c.execute("SELECT *, 0.0 as fts_score FROM stores WHERE neighborhood = ?", (clean_neigh,))
             else:
                 c.execute("SELECT *, 0.0 as fts_score FROM stores")
             candidate_rows = [dict(r) for r in c.fetchall()]
 
-        # Processar, pontuar e enriquecer cada loja candidata
         scored_stores = []
         core_stems = [stem_pt(w) for w in core_words if len(w) >= 2]
 
         for r in candidate_rows:
             store_neigh = r.get("neighborhood") or "Ribeirão Preto"
-            in_selected_neigh = ( clean_neigh.lower() == store_neigh.lower() ) if clean_neigh else True
+            in_selected_neigh = (clean_neigh.lower() == store_neigh.lower()) if clean_neigh else True
 
-            # Calcular distância física em km se tivermos ponto de referência (GPS ou Bairro)
             dist_km = None
             lat = r.get("latitude")
             lng = r.get("longitude")
             if ref_lat is not None and ref_lng is not None and lat and lng:
                 dist_km = round(haversine_km(ref_lat, ref_lng, float(lat), float(lng)), 1)
 
-            # Se o usuário filtrou por bairro:
             if clean_neigh and not in_selected_neigh:
-                # Se não tem busca por produto ou se está longe (> 4.5 km), ignora lojas fora do bairro
                 if not has_query or not include_nearby or dist_km is None or dist_km > 4.5:
                     continue
 
-            # Avaliar precisão do Match quando há busca textual
             match_tier = 1
             matched_core_count = 0
             match_reasons = []
@@ -463,9 +530,6 @@ def local_search(
                         matched_core_count += 1
                         matched_terms_display.append(orig_w)
 
-                # Tier 1: Contém TODAS as palavras-chave principais que o usuário pediu
-                # Tier 2: Contém pelo menos uma palavra principal
-                # Tier 3: Match por expansão semântica/sinônimo do setor
                 if matched_core_count == len(core_stems):
                     match_tier = 1
                 elif matched_core_count > 0:
@@ -473,17 +537,15 @@ def local_search(
                 else:
                     match_tier = 3
 
-                # Construir evidências claras de por que esta loja responde à busca
                 for stem in core_stems:
                     if stem in brands_norm:
-                        match_reasons.append(f"Trabalha com a marca pesquisada")
+                        match_reasons.append("Trabalha com a marca pesquisada")
                         break
                 if r.get("subcategory") and r.get("subcategory") != "Comércio Local":
                     match_reasons.append(f"Especialidade: {r.get('subcategory')}")
                 if matched_terms_display:
                     match_reasons.append(f"Termos identificados: {', '.join(dict.fromkeys(matched_terms_display))}")
 
-            # Filtrar e ordenar produtos de amostra (se a loja tiver catálogo)
             raw_samples = []
             if r.get("sample_products"):
                 try:
@@ -492,7 +554,6 @@ def local_search(
                     raw_samples = []
 
             if has_query and raw_samples and core_stems:
-                # Prioriza amostras cujo título bate com a busca do usuário
                 matching_samples = []
                 other_samples = []
                 for sp in raw_samples:
@@ -503,14 +564,12 @@ def local_search(
                     else:
                         sp["is_direct_match"] = False
                         other_samples.append(sp)
-                # Se encontrou produtos exatos da busca, mostra eles! Caso contrário, mostra até 3 exemplos gerais
                 r["sample_products"] = (matching_samples + other_samples[:2])[:3] if matching_samples else other_samples[:3]
                 if matching_samples:
-                    match_reasons.insert(0, f"Item encontrado no catálogo da loja")
+                    match_reasons.insert(0, "Item encontrado no catálogo da loja")
             else:
                 r["sample_products"] = raw_samples[:3]
 
-            # Formatar WhatsApp e Telefone
             phone = r.get("whatsapp") or ""
             r["whatsapp_url"] = format_whatsapp_url(phone, r.get("name", "Loja"), q)
             clean_digits = re.sub(r"\D", "", phone)
@@ -522,7 +581,6 @@ def local_search(
             else:
                 r["phone_display"] = phone or "Consulte via WhatsApp"
 
-            # Listas limpas de marcas e especialidades
             brands_str = r.get("top_brands") or ""
             r["brands_list"] = [b.strip() for b in brands_str.split(",") if b.strip()][:7]
 
@@ -534,7 +592,6 @@ def local_search(
             r["match_tier"] = match_tier
             r["match_reasons"] = list(dict.fromkeys(match_reasons))[:3]
 
-            # Badge de proximidade física
             if clean_neigh and in_selected_neigh:
                 r["proximity_badge"] = f"📍 No bairro {store_neigh}"
             elif dist_km is not None:
@@ -544,26 +601,19 @@ def local_search(
 
             scored_stores.append(r)
 
-        # Se a busca com match estrito retornou muitos resultados Tier 1, podemos ocultar Tier 3 ruído
         tier1_count = sum(1 for s in scored_stores if s["match_tier"] == 1)
         if has_query and tier1_count >= 5:
             scored_stores = [s for s in scored_stores if s["match_tier"] in (1, 2)]
 
-        # Ordenação Multicritério Inteligente:
-        # 1. Se filtrou por bairro: lojas DENTRO do bairro vêm primeiro (in_selected_neighborhood DESC)
-        # 2. Match Tier (1 = todas as palavras, 2 = parcial, 3 = sinônimo de setor)
-        # 3. Se usuário ativou GPS ("Perto de mim"): ordena por distância física + relevância
-        # 4. Patrocinados / Com catálogo / Score BM25
         def sort_key(item):
             in_neigh_rank = 0 if item["in_selected_neighborhood"] else 1
             tier_rank = item["match_tier"]
             sponsored_rank = 0 if item.get("is_sponsored") == 1 else 1
             dist_val = item["distance_km"] if item["distance_km"] is not None else 999.0
-            fts_val = float(item.get("fts_score") or 0.0) # negativo no SQLite bm25 (menor = melhor)
+            fts_val = float(item.get("fts_score") or 0.0)
             catalog_rank = 0 if item.get("has_catalog") == 1 else 1
 
             if (user_lat is not None and user_lng is not None) or clean_neigh:
-                # Quando GPS ou filtro de bairro está ativo, prioriza estar no bairro -> match_tier -> menor distância física
                 return (in_neigh_rank, tier_rank, sponsored_rank, round(dist_val, 0), fts_val, catalog_rank)
             return (in_neigh_rank, tier_rank, sponsored_rank, fts_val, dist_val, catalog_rank, item.get("name", ""))
 
@@ -586,6 +636,7 @@ def local_search(
         set_in_cache(cache_key, result_payload)
         return result_payload
 
+
 @app.get("/api/search")
 def search_bridge(
     q: Optional[str] = Query(None),
@@ -593,16 +644,18 @@ def search_bridge(
     limit: int = 40,
     offset: int = 0
 ):
-    """Bridge de compatibilidade para buscas."""
+    """Bridge de compatibilidade para buscas legadas."""
     return local_search(q=q, neighborhood=neighborhood, limit=limit, offset=offset)
+
 
 @app.get("/api/stores")
 def get_stores():
+    """Retorna a listagem resumida de todas as lojas públicas."""
     cached = get_from_cache("all_stores_simple_v25", ttl_seconds=600)
     if cached:
         return cached
 
-    with db_transaction() as conn:
+    with db_transaction(PUBLIC_DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
         SELECT id, name, neighborhood, category, macro_category, subcategory, is_sponsored, has_catalog, product_count
@@ -613,9 +666,155 @@ def get_stores():
         set_in_cache("all_stores_simple_v25", rows)
         return rows
 
-# Serve frontend
+
+# ==============================================================================
+# 4. PAINEL DE CONTROLE E MANUTENÇÃO LOCAL (/api/admin/*)
+#    Permite rodar Captura, Extração Textual, IA Local, Compilação e Deploy
+#    diretamente pela interface web quando rodando no PC do desenvolvedor.
+# ==============================================================================
+_ADMIN_JOB_STATE: Dict[str, Any] = {
+    "running": False,
+    "step": None,
+    "started_at": None,
+    "finished_at": None,
+    "exit_code": None,
+    "logs": [],
+    "process": None
+}
+
+
+class AdminRunStepPayload(BaseModel):
+    step: str  # 'discover', 'crawl-text', 'scrap', 'enrich-ai', 'build-kb', 'deploy', 'all'
+    query: Optional[str] = None
+    force: bool = False
+    msg: Optional[str] = "Atualizacao via Painel de Controle CompraRibeirao"
+
+
+@app.get("/api/admin/status")
+def admin_get_status():
+    """
+    Retorna o diagnóstico completo dos bancos de dados (bruto e público),
+    status do Ollama e os logs em tempo real de tarefas de manutenção em execução.
+    """
+    diag = get_system_diagnostics()
+    return {
+        "is_local_pc": diag["raw_db_exists"],
+        "diagnostics": diag,
+        "job": {
+            "running": _ADMIN_JOB_STATE["running"],
+            "step": _ADMIN_JOB_STATE["step"],
+            "started_at": _ADMIN_JOB_STATE["started_at"],
+            "finished_at": _ADMIN_JOB_STATE["finished_at"],
+            "exit_code": _ADMIN_JOB_STATE["exit_code"],
+            "logs": _ADMIN_JOB_STATE["logs"][-120:]  # Últimas 120 linhas de log
+        }
+    }
+
+
+@app.post("/api/admin/run-step")
+def admin_run_step(payload: AdminRunStepPayload):
+    """
+    Dispara uma etapa da esteira de manutenção em segundo plano no PC local.
+    Bloqueado automaticamente na nuvem (Render) para segurança e proteção de RAM.
+    """
+    if not os.path.exists(RAW_DB_PATH):
+        raise HTTPException(
+            status_code=403,
+            detail="Operação disponível apenas no PC Local de Desenvolvimento (onde o banco bruto 'compraribeirao.db' e a IA Ollama estão instalados)."
+        )
+
+    if _ADMIN_JOB_STATE["running"]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Já existe uma etapa em execução ('{_ADMIN_JOB_STATE['step']}'). Aguarde finalizar ou interrompa antes de iniciar outra."
+        )
+
+    valid_steps = {"discover", "crawl-text", "scrap", "enrich-ai", "build-kb", "deploy", "all"}
+    if payload.step not in valid_steps:
+        raise HTTPException(status_code=400, detail=f"Etapa inválida: {payload.step}")
+
+    venv_python = os.path.join(ROOT_DIR, "venv", "Scripts", "python.exe")
+    if not os.path.exists(venv_python):
+        venv_python = sys.executable
+
+    cmd = [venv_python, "-u", os.path.join(BACKEND_DIR, "run_pipeline.py"), "--step", payload.step]
+    if payload.query and payload.query.strip():
+        cmd.extend(["--query", payload.query.strip()])
+    if payload.force:
+        cmd.append("--force")
+    if payload.step == "deploy" and payload.msg:
+        cmd.extend(["--msg", payload.msg.strip()])
+
+    def _worker():
+        _ADMIN_JOB_STATE["running"] = True
+        _ADMIN_JOB_STATE["step"] = payload.step
+        _ADMIN_JOB_STATE["started_at"] = time.strftime("%H:%M:%S")
+        _ADMIN_JOB_STATE["finished_at"] = None
+        _ADMIN_JOB_STATE["exit_code"] = None
+        _ADMIN_JOB_STATE["logs"] = [f"[{_ADMIN_JOB_STATE['started_at']}] Iniciando etapa '{payload.step}'..."]
+
+        try:
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            proc = subprocess.Popen(
+                cmd,
+                cwd=ROOT_DIR,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env
+            )
+            _ADMIN_JOB_STATE["process"] = proc
+
+            for line in proc.stdout:
+                clean_line = line.rstrip("\r\n")
+                if clean_line:
+                    _ADMIN_JOB_STATE["logs"].append(clean_line)
+
+            proc.wait()
+            _ADMIN_JOB_STATE["exit_code"] = proc.returncode
+            _ADMIN_JOB_STATE["finished_at"] = time.strftime("%H:%M:%S")
+            _ADMIN_JOB_STATE["logs"].append(
+                f"[{_ADMIN_JOB_STATE['finished_at']}] Etapa '{payload.step}' finalizada (código {proc.returncode})."
+            )
+            # Limpa o cache da API para refletir imediatamente qualquer atualização no banco público
+            clear_all_cache()
+        except Exception as e:
+            _ADMIN_JOB_STATE["exit_code"] = -1
+            _ADMIN_JOB_STATE["finished_at"] = time.strftime("%H:%M:%S")
+            _ADMIN_JOB_STATE["logs"].append(f"[ERRO] Falha ao executar etapa: {e}")
+        finally:
+            _ADMIN_JOB_STATE["running"] = False
+            _ADMIN_JOB_STATE["process"] = None
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return {"status": "started", "step": payload.step}
+
+
+@app.post("/api/admin/stop-job")
+def admin_stop_job():
+    """Interrompe imediatamente uma tarefa de manutenção em andamento."""
+    proc = _ADMIN_JOB_STATE.get("process")
+    if proc and _ADMIN_JOB_STATE["running"]:
+        try:
+            proc.terminate()
+            _ADMIN_JOB_STATE["logs"].append("[!] Tarefa interrompida manualmente pelo usuário.")
+            _ADMIN_JOB_STATE["running"] = False
+            return {"status": "stopped"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+    return {"status": "no_job_running"}
+
+
+# ==============================================================================
+# 5. SERVIÇO DE ARQUIVOS ESTÁTICOS DO FRONTEND
+# ==============================================================================
 if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
 
 @app.get("/")
 def index():
@@ -623,6 +822,7 @@ def index():
     if os.path.exists(index_file):
         return FileResponse(index_file)
     return {"message": "CompraRibeirão API está no ar!"}
+
 
 if __name__ == "__main__":
     import uvicorn

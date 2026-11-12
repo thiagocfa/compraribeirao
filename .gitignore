@@ -11,3 +11,6 @@ __pycache__/
 .pytest_cache/
 .vscode/
 .idea/
+# Banco bruto de mineração local (415 MB) - permanece APENAS no PC local!
+# Para a nuvem sobe apenas o compraribeirao_publico.db (~3 MB)
+compraribeirao.db
