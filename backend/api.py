@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(__file__))
 from database import get_connection, db_transaction
 import search_terms
 import crawlers.universal_crawler as universal_crawler
+from smart_search import smart_search_stores
 
 app = FastAPI(title="CompraRibeirão API", version="1.0.0")
 
@@ -23,6 +24,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/api/smart-search")
+def smart_search(
+    q: Optional[str] = Query(None, description="Busca inteligente (ex: bateria de carro, ração gato, porcelanato)"),
+    neighborhood: Optional[str] = Query(None, description="Filtrar por bairro"),
+    limit: int = Query(60, description="Limite de lojas retornadas")
+):
+    return smart_search_stores(q=q, neighborhood=neighborhood, limit=limit)
 
 @app.get("/api/search-terms")
 def get_terms():
