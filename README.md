@@ -1,40 +1,41 @@
-# CompraRibeirão 🚀
-> Buscador em tempo real de produtos no comércio físico de Ribeirão Preto - SP.
+# 🛒 CompraRibeirão
+
+> **Buscador em tempo real de produtos no comércio físico de Ribeirão Preto - SP.**  
+> Encontre onde tem estoque agora nas lojas físicas da cidade sem precisar ligar ou sair de casa, com contato direto por WhatsApp.
 
 ---
 
-## 🌟 O que está funcionando agora:
-1. **Catálogo Real de Ribeirão Preto:**
-   - **Babá Materiais de Construção** (Campos Elísios / Av. Saudade) - Extração via API VTEX.
-   - **Dorival Auto Peças** (Ipiranga / Rua Mato Grosso) - Extração via Tray E-commerce + Metadados.
-   - **Raicrom Ferramentas & Tecnologia** (Alto da Boa Vista / R. Maestro Joaquim Rangel) - Extração via Tray E-commerce.
-2. **Motor de Busca Textual Instantâneo (FTS5):**
-   - Busca em milissegundos por nome do produto, marca, categoria ou bairro.
-3. **Conversão Direta para o Lojista:**
-   - Botão **WhatsApp** com mensagem pré-formatada perguntando disponibilidade de retirada imediata na loja física.
-   - Link direto para a página do produto no site oficial da loja.
-4. **Espaço Publicitário & Monetização Local:**
-   - Banner de topo para campanhas patrocinadas locais.
-   - Selo *"★ Patrocinado"* que dá prioridade aos parceiros nas buscas.
+## 📖 Documentação Completa do Projeto
+
+Para entender toda a arquitetura, o que cada script faz, o fluxo operacional passo a passo e o modelo de negócio, consulte o documento detalhado:
+
+👉 **[DOCUMENTACAO_DO_PROJETO.md](DOCUMENTACAO_DO_PROJETO.md)**
 
 ---
 
-## 💻 Como rodar localmente:
+## ⚡ Status Atual do Catálogo
 
-### 1. Iniciar o Servidor Web e API:
-```powershell
-.\venv\Scripts\python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000 --reload
-```
-Acesse no navegador: **`http://localhost:8000`**
+- **Produtos ativos cadastrados:** +90.000 produtos
+- **Lojas físicas no catálogo:** 314 lojas
+- **Bairros mapeados:** 95 bairros de Ribeirão Preto
+- **Estabelecimentos comerciais descobertos no Google Maps:** +1.000 lojas
 
-### 2. Rodar novos crawlers e atualizar catálogo:
-```powershell
-# Coletar Babá Materiais (VTEX)
-.\venv\Scripts\python backend/crawlers/vtex_crawler.py
+---
 
-# Coletar Dorival e Raicrom (Tray)
-.\venv\Scripts\python backend/crawlers/tray_crawler.py
+## 🚀 Como Iniciar com 1 Clique (Windows)
 
-# Reconstruir índice de busca FTS5
-.\venv\Scripts\python backend/indexer.py
-```
+1. **Ligar o Servidor do Site:**  
+   Dê dois cliques no arquivo `ligar_servidor.bat`  
+   Acesse no navegador: **`http://localhost:8000`**
+
+2. **Minerar Lojas e Produtos:**  
+   Dê dois cliques no arquivo `executar_pipeline.bat` (ou execute `python pipeline.py`)
+
+3. **Sincronizar com o GitHub:**  
+   Dê dois cliques no arquivo `sincronizar_nuvem.bat`
+
+---
+
+## 🌐 Deploy na Nuvem (Render.com)
+
+O projeto possui um `Dockerfile` pronto para execução contínua gratuita no [Render.com](https://render.com). Conecte este repositório no Render como **Web Service** para ter o site rodando 24/7 com link público próprio.
