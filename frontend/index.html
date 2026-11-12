@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <!-- Leaflet CSS & JS para Mapa Local Leve -->
+  <!-- Leaflet CSS & JS para Mapa Local Leve (100% Free OpenStreetMap) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
@@ -24,7 +24,7 @@
     .custom-scrollbar::-webkit-scrollbar { width: 6px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1); }
+    .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1); }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
@@ -166,15 +166,24 @@
   <main class="max-w-7xl mx-auto px-4 py-4 w-full flex-1">
     
     <!-- BARRA DE STATUS / ALTERNAR VISUALIZAÇÃO -->
-    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-      <div class="flex items-center gap-2">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div class="flex items-center gap-2 flex-wrap">
         <h2 id="results-title" class="text-base font-bold text-slate-800">Lojas Físicas Encontradas:</h2>
         <span id="results-count" class="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold border border-blue-200">
           Carregando...
         </span>
+
+        <!-- BOTÃO DESTAQUE: EXPANDIR MAPA COM TODOS OS LOCAIS -->
+        <button 
+          onclick="openFullscreenMap()" 
+          class="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-full transition-all shadow-sm active:scale-95"
+        >
+          <i class="fa-solid fa-map-location-dot text-emerald-600"></i>
+          <span>Expandir Mapa com Todos os Locais</span>
+        </button>
       </div>
 
-      <!-- BOTÕES DE CONTROLE DA VISUALIZAÇÃO -->
+      <!-- BOTÕES DE CONTROLE DA VISUALIZAÇÃO NA PÁGINA -->
       <div class="flex items-center bg-white border border-slate-200 rounded-xl p-1 shadow-sm text-xs font-semibold text-slate-600">
         <button id="view-split" onclick="setViewMode('split')" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors">
           <i class="fa-solid fa-table-columns"></i>
@@ -185,7 +194,7 @@
           <span class="hidden sm:inline">Apenas Lojas</span>
         </button>
         <button id="view-map" onclick="setViewMode('map')" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors">
-          <i class="fa-solid fa-map-location-dot"></i>
+          <i class="fa-solid fa-map"></i>
           <span class="hidden sm:inline">Apenas Mapa</span>
         </button>
       </div>
@@ -227,14 +236,27 @@
             <span class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
               <i class="fa-solid fa-map-pin text-blue-600"></i> Mapa de Ribeirão Preto
             </span>
-            <span id="map-counter" class="text-[11px] text-slate-400 font-medium">0 pontos no mapa</span>
+            <div class="flex items-center gap-2">
+              <span id="map-counter" class="text-[11px] text-slate-400 font-medium">0 pontos</span>
+              <!-- BOTÃO ENQUADRAR -->
+              <button onclick="fitAllMapBounds()" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs transition-colors" title="Enquadrar todos os locais">
+                <i class="fa-solid fa-crosshairs"></i>
+              </button>
+              <!-- BOTÃO EXPANDIR TELA CHEIA -->
+              <button onclick="openFullscreenMap()" class="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs transition-colors font-bold" title="Expandir Mapa em Tela Cheia">
+                <i class="fa-solid fa-expand"></i>
+              </button>
+            </div>
           </div>
 
-          <!-- MAP DIV -->
+          <!-- MAP DIV (100% FREE OSM) -->
           <div id="leaflet-map" class="w-full h-[520px] rounded-xl bg-slate-100 border border-slate-200 z-10"></div>
           
-          <div class="text-[11px] text-slate-400 text-center mt-2">
-            Clique em qualquer ponto do mapa para ver telefone e rota até a loja.
+          <div class="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
+            <span>Clique nos pontos para WhatsApp e Rota GPS.</span>
+            <button onclick="openFullscreenMap()" class="text-blue-600 font-bold hover:underline">
+              Ver em tela cheia &rarr;
+            </button>
           </div>
         </div>
       </div>
@@ -242,6 +264,56 @@
     </div>
 
   </main>
+
+  <!-- MODAL DE MAPA EXPANDIDO EM TELA CHEIA -->
+  <div id="modal-map-fullscreen" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden flex flex-col p-2 sm:p-4">
+    <div class="bg-white rounded-2xl w-full h-full shadow-2xl flex flex-col overflow-hidden relative border border-slate-200">
+      
+      <!-- TOP BAR DO MAPA EXPANDIDO -->
+      <div class="p-3 sm:p-4 border-b border-slate-200 flex items-center justify-between gap-3 bg-white z-20 shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-base shadow-sm">
+            <i class="fa-solid fa-map-location-dot"></i>
+          </div>
+          <div>
+            <h3 class="text-sm sm:text-base font-black text-slate-900 leading-tight">Mapa Comercial de Ribeirão Preto</h3>
+            <span id="fullscreen-map-counter" class="text-xs text-blue-600 font-bold">0 estabelecimentos mapeados</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button onclick="fitAllFullscreenBounds()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5">
+            <i class="fa-solid fa-crosshairs text-blue-600"></i>
+            <span class="hidden sm:inline">Enquadrar Todos</span>
+          </button>
+          <button onclick="closeFullscreenMap()" class="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow transition-colors flex items-center gap-1.5">
+            <i class="fa-solid fa-xmark"></i>
+            <span>Fechar Mapa</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- CORPO COM MAPA FULL E GAVETA LATERAL DE LOJAS -->
+      <div class="flex-1 relative flex overflow-hidden">
+        
+        <!-- DIV DO MAPA FULL -->
+        <div id="fullscreen-leaflet-map" class="w-full h-full bg-slate-100 z-10"></div>
+
+        <!-- GAVETA FLUTUANTE DE LOJAS MAPEADAS (DESK: LATERAL, MOB: INFERIOR) -->
+        <div class="absolute right-3 top-3 bottom-3 w-80 max-w-[85vw] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 z-20 flex flex-col hidden sm:flex">
+          <div class="p-3 border-b border-slate-100 flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-800">Estabelecimentos Encontrados</span>
+            <span id="drawer-counter" class="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-bold"></span>
+          </div>
+          <div id="drawer-stores-list" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar text-xs">
+            <!-- Injetado dinamicamente -->
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
 
   <!-- MODAL: ANUNCIE SUA LOJA / CADASTRO -->
   <div id="modal-lojista" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
@@ -299,33 +371,50 @@
     let currentQuery = '';
     let currentNeighborhood = '';
     let currentOffset = 0;
-    const limit = 30;
+    const limit = 35;
     let totalStores = 0;
     let storesData = [];
+    
+    // Mapas
     let leafletMap = null;
     let markersLayer = null;
-    let currentViewMode = 'split';
+    let fullscreenMap = null;
+    let fullscreenMarkersLayer = null;
+    let currentValidCoords = [];
 
-    // Inicialização do Mapa
+    // Inicialização do Mapa Inline (OpenStreetMap Standard - 100% Free, Sem API Key)
     function initMap() {
-      // Coordenadas centrais de Ribeirão Preto
       leafletMap = L.map('leaflet-map').setView([-21.1775, -47.8103], 12);
       
-      // Camada CartoDB Positron (visual moderno, limpo e leve)
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19
       }).addTo(leafletMap);
 
       markersLayer = L.layerGroup().addTo(leafletMap);
     }
 
-    // Atualização dos Marcadores no Mapa
-    function updateMapMarkers(stores) {
-      if (!markersLayer) return;
-      markersLayer.clearLayers();
+    // Inicialização do Mapa Fullscreen
+    function initFullscreenMap() {
+      if (fullscreenMap) return;
+      fullscreenMap = L.map('fullscreen-leaflet-map').setView([-21.1775, -47.8103], 12);
 
-      const validCoords = [];
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19
+      }).addTo(fullscreenMap);
+
+      fullscreenMarkersLayer = L.layerGroup().addTo(fullscreenMap);
+    }
+
+    // Atualização dos Marcadores nos Mapas
+    function updateMapMarkers(stores) {
+      if (markersLayer) markersLayer.clearLayers();
+      if (fullscreenMarkersLayer) fullscreenMarkersLayer.clearLayers();
+
+      currentValidCoords = [];
+      const drawerList = document.getElementById('drawer-stores-list');
+      if (drawerList) drawerList.innerHTML = '';
 
       stores.forEach((store, index) => {
         if (store.latitude && store.longitude) {
@@ -333,12 +422,12 @@
           const lng = parseFloat(store.longitude);
 
           if (!isNaN(lat) && !isNaN(lng)) {
-            validCoords.push([lat, lng]);
+            currentValidCoords.push([lat, lng]);
 
-            // Custom Icon
             const isSponsored = store.is_sponsored === 1;
             const markerColor = isSponsored ? '#f59e0b' : '#2563eb';
             
+            // Ícone Personalizado
             const customIcon = L.divIcon({
               className: 'custom-pin',
               html: `
@@ -350,48 +439,129 @@
               iconAnchor: [14, 14]
             });
 
-            const marker = L.marker([lat, lng], { icon: customIcon });
+            // Link de rota GPS no Google Maps / Waze
+            const gmapsRouteUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
 
-            // Popup com visual caprichado e botão direto de WhatsApp
+            // Conteúdo do Popup
             const popupContent = `
-              <div class="p-1 max-w-[240px]">
+              <div class="p-1 max-w-[250px]">
                 <div class="font-bold text-sm text-slate-900 leading-tight">${store.name}</div>
                 <div class="text-xs text-blue-600 font-semibold mt-0.5"><i class="fa-solid fa-location-dot"></i> ${store.neighborhood || 'Ribeirão Preto'}</div>
                 <div class="text-[11px] text-slate-500 mt-1">${store.address || ''}</div>
                 ${store.phone_display ? `<div class="text-[11px] font-bold text-slate-700 mt-1"><i class="fa-solid fa-phone"></i> ${store.phone_display}</div>` : ''}
-                ${store.whatsapp_url ? `
-                  <a href="${store.whatsapp_url}" target="_blank" class="mt-2 block w-full py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-center font-bold text-xs rounded-lg shadow transition-colors">
-                    <i class="fa-brands fa-whatsapp mr-1"></i> Falar no WhatsApp
+                
+                <div class="mt-2.5 flex flex-col gap-1.5">
+                  ${store.whatsapp_url ? `
+                    <a href="${store.whatsapp_url}" target="_blank" class="block w-full py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-center font-bold text-xs rounded-lg shadow transition-colors">
+                      <i class="fa-brands fa-whatsapp mr-1"></i> Falar no WhatsApp
+                    </a>
+                  ` : ''}
+                  <a href="${gmapsRouteUrl}" target="_blank" class="block w-full py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-center font-bold text-xs rounded-lg transition-colors">
+                    <i class="fa-solid fa-diamond-turn-right text-blue-600 mr-1"></i> Abrir Rota GPS
                   </a>
-                ` : ''}
+                </div>
               </div>
             `;
 
-            marker.bindPopup(popupContent);
-            markersLayer.addLayer(marker);
+            // Marcador no mapa principal
+            if (markersLayer) {
+              const marker = L.marker([lat, lng], { icon: customIcon });
+              marker.bindPopup(popupContent);
+              markersLayer.addLayer(marker);
+            }
+
+            // Marcador no mapa fullscreen
+            if (fullscreenMarkersLayer) {
+              const markerFs = L.marker([lat, lng], { icon: customIcon });
+              markerFs.bindPopup(popupContent);
+              fullscreenMarkersLayer.addLayer(markerFs);
+            }
+
+            // Item na gaveta lateral do mapa fullscreen
+            if (drawerList) {
+              const item = document.createElement('div');
+              item.className = "p-2.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 rounded-xl cursor-pointer transition-colors";
+              item.onclick = () => {
+                if (fullscreenMap) {
+                  fullscreenMap.flyTo([lat, lng], 16, { duration: 1 });
+                }
+              };
+              item.innerHTML = `
+                <div class="font-bold text-slate-900 line-clamp-1">${store.name}</div>
+                <div class="text-[11px] text-blue-600 font-semibold">${store.neighborhood}</div>
+                <div class="text-[10px] text-slate-400 mt-0.5 line-clamp-1">${store.category || ''}</div>
+              `;
+              drawerList.appendChild(item);
+            }
+
           }
         }
       });
 
-      document.getElementById('map-counter').innerText = `${validCoords.length} pontos no mapa`;
+      const countText = `${currentValidCoords.length} pontos no mapa`;
+      const counterEl = document.getElementById('map-counter');
+      if (counterEl) counterEl.innerText = countText;
 
-      // Ajusta zoom e enquadramento automaticamente
-      if (validCoords.length > 0) {
-        const bounds = L.latLngBounds(validCoords);
+      const fsCounter = document.getElementById('fullscreen-map-counter');
+      if (fsCounter) fsCounter.innerText = `${currentValidCoords.length} lojas mapeadas`;
+
+      const drawerCounter = document.getElementById('drawer-counter');
+      if (drawerCounter) drawerCounter.innerText = `${currentValidCoords.length}`;
+
+      fitAllMapBounds();
+    }
+
+    // Enquadra todos os pontos no mapa inline
+    function fitAllMapBounds() {
+      if (!leafletMap) return;
+      if (currentValidCoords.length > 0) {
+        const bounds = L.latLngBounds(currentValidCoords);
         leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
       } else {
         leafletMap.setView([-21.1775, -47.8103], 12);
       }
     }
 
-    // Foca o mapa em uma loja específica ao clicar no card
+    // Enquadra todos os pontos no mapa fullscreen
+    function fitAllFullscreenBounds() {
+      if (!fullscreenMap) return;
+      if (currentValidCoords.length > 0) {
+        const bounds = L.latLngBounds(currentValidCoords);
+        fullscreenMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+      } else {
+        fullscreenMap.setView([-21.1775, -47.8103], 12);
+      }
+    }
+
+    // Abre modal de mapa fullscreen
+    function openFullscreenMap() {
+      const modal = document.getElementById('modal-map-fullscreen');
+      modal.classList.remove('hidden');
+
+      initFullscreenMap();
+      updateMapMarkers(storesData);
+
+      setTimeout(() => {
+        if (fullscreenMap) {
+          fullscreenMap.invalidateSize();
+          fitAllFullscreenBounds();
+        }
+      }, 200);
+    }
+
+    // Fecha modal de mapa fullscreen
+    function closeFullscreenMap() {
+      const modal = document.getElementById('modal-map-fullscreen');
+      modal.classList.add('hidden');
+    }
+
+    // Foca o mapa em uma loja específica
     function focusStoreOnMap(lat, lng, storeName) {
-      if (!leafletMap) return;
-      leafletMap.flyTo([lat, lng], 16, { duration: 1.2 });
-      
-      // Se estiver em mobile, faz scroll suave até o mapa
-      if (window.innerWidth < 1024) {
-        document.getElementById('col-map').scrollIntoView({ behavior: 'smooth' });
+      if (leafletMap) {
+        leafletMap.flyTo([lat, lng], 16, { duration: 1.2 });
+        if (window.innerWidth < 1024) {
+          document.getElementById('col-map').scrollIntoView({ behavior: 'smooth' });
+        }
       }
     }
 
@@ -474,11 +644,8 @@
 
         emptyState.classList.add('hidden');
 
-        // Renderizar Cards de Lojas
         if (!isLoadMore) {
           container.innerHTML = '';
-        } else {
-          // Remove spinner se houver
         }
 
         storesData.forEach(store => {
@@ -557,8 +724,11 @@
         `;
       }
 
-      // Botão de focar no mapa
+      // Botão de focar no mapa e link rota GPS
       const hasCoords = store.latitude && store.longitude;
+      const gmapsRouteUrl = hasCoords 
+        ? `https://www.google.com/maps/dir/?api=1&destination=${store.latitude},${store.longitude}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(store.name + ' ' + (store.address || 'Ribeirão Preto'))}`;
 
       card.innerHTML = `
         <div class="flex items-start justify-between gap-3">
@@ -576,8 +746,9 @@
           </div>
 
           ${hasCoords ? `
-            <button onclick="focusStoreOnMap(${store.latitude}, ${store.longitude}, '${store.name}')" class="shrink-0 p-2 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 border border-slate-200 transition-colors" title="Ver no Mapa">
-              <i class="fa-solid fa-map-location-dot text-base"></i>
+            <button onclick="focusStoreOnMap(${store.latitude}, ${store.longitude}, '${store.name}')" class="shrink-0 p-2 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-500 hover:text-blue-600 border border-slate-200 transition-colors flex items-center gap-1 text-xs font-bold" title="Ver no Mapa">
+              <i class="fa-solid fa-map-location-dot text-sm text-blue-600"></i>
+              <span class="hidden sm:inline">No Mapa</span>
             </button>
           ` : ''}
         </div>
@@ -600,9 +771,15 @@
             <div class="font-bold text-slate-700 mt-0.5"><i class="fa-solid fa-phone mr-1 text-slate-400"></i> ${store.phone_display}</div>
           </div>
 
-          <div class="flex items-center gap-2 shrink-0">
+          <div class="flex items-center gap-2 shrink-0 flex-wrap">
+            <!-- ROTA GPS GOOGLE MAPS -->
+            <a href="${gmapsRouteUrl}" target="_blank" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors flex items-center gap-1.5" title="Abrir GPS no Google Maps">
+              <i class="fa-solid fa-diamond-turn-right text-blue-600"></i>
+              <span>Como Chegar</span>
+            </a>
+
             ${store.website ? `
-              <a href="${store.website}" target="_blank" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors">
+              <a href="${store.website}" target="_blank" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors" title="Site da Loja">
                 <i class="fa-solid fa-globe"></i>
               </a>
             ` : ''}
@@ -641,7 +818,6 @@
 
     // Alternar modos de visualização (Split, Lista, Mapa)
     function setViewMode(mode) {
-      currentViewMode = mode;
       const colStores = document.getElementById('col-stores');
       const colMap = document.getElementById('col-map');
       
@@ -649,7 +825,6 @@
       const btnList = document.getElementById('view-list');
       const btnMap = document.getElementById('view-map');
 
-      // Reset classes dos botões
       [btnSplit, btnList, btnMap].forEach(btn => {
         btn.className = "px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors";
       });
