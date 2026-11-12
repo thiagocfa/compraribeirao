@@ -1,1 +1,2 @@
-*.db filter=lfs diff=lfs merge=lfs -text
+compraribeirao_publico.db -filter -diff -merge
+compraribeirao.db filter=lfs diff=lfs merge=lfs -text

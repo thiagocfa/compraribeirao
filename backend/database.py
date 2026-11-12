@@ -4,22 +4,27 @@ import time
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "compraribeirao.db")
+ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+PUBLIC_DB_PATH = os.path.join(ROOT_DIR, "compraribeirao_publico.db")
+RAW_DB_PATH = os.path.join(ROOT_DIR, "compraribeirao.db")
 
-def get_connection():
+# Se o banco leve de inteligência local existir, usa ele como padrão na API pública
+DB_PATH = PUBLIC_DB_PATH if os.path.exists(PUBLIC_DB_PATH) else RAW_DB_PATH
+
+def get_connection(db_target: Optional[str] = None):
     """Retorna uma conexão SQLite com WAL mode, tolerância a concorrência e timeout de 60 segundos."""
-    conn = sqlite3.connect(DB_PATH, timeout=60.0)
+    target = db_target or DB_PATH
+    conn = sqlite3.connect(target, timeout=60.0)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA busy_timeout=60000;")
-    conn.execute("PRAGMA cache_size=-64000;") # 64 MB de cache em RAM
+    conn.execute("PRAGMA cache_size=-32000;") # 32 MB cache
     conn.execute("PRAGMA temp_store=MEMORY;")
-    conn.execute("PRAGMA mmap_size=268435456;") # 256 MB memory-mapped I/O
     conn.row_factory = sqlite3.Row
     return conn
 
 @contextmanager
-def db_transaction(max_retries: int = 5, retry_delay: float = 1.0):
+def db_transaction(db_target: Optional[str] = None, max_retries: int = 5, retry_delay: float = 1.0):
     """
     Gerenciador de contexto para transações seguras.
     Fecha a conexão SEMPRE (mesmo com erro) e retenta se o banco estiver momentaneamente ocupado.
@@ -27,7 +32,7 @@ def db_transaction(max_retries: int = 5, retry_delay: float = 1.0):
     for attempt in range(max_retries):
         conn = None
         try:
-            conn = get_connection()
+            conn = get_connection(db_target)
             yield conn
             conn.commit()
             return
@@ -60,7 +65,7 @@ def execute_with_retry(func, *args, max_retries: int = 5, retry_delay: float = 1
             raise
 
 def init_db():
-    with db_transaction() as conn:
+    with db_transaction(RAW_DB_PATH) as conn:
         cursor = conn.cursor()
         
         # Tabela de Lojas de Ribeirão Preto
@@ -77,7 +82,7 @@ def init_db():
             whatsapp TEXT,
             website TEXT,
             logo_url TEXT,
-            platform TEXT, -- 'vtex', 'tray', 'manual'
+            platform TEXT,
             is_sponsored BOOLEAN DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -98,7 +103,7 @@ def init_db():
             image_url TEXT,
             product_url TEXT NOT NULL,
             in_stock BOOLEAN DEFAULT 1,
-            source_type TEXT DEFAULT 'crawler', -- 'crawler', 'manual', 'api'
+            source_type TEXT DEFAULT 'crawler',
             is_sponsored BOOLEAN DEFAULT 0,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (store_id) REFERENCES stores(id)
@@ -119,7 +124,7 @@ def init_db():
         )
         """)
 
-        # Tabela de Espaços Publicitários (Anúncios Patrocinados Locais)
+        # Tabela de Espaços Publicitários
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS ad_banners (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,7 +132,7 @@ def init_db():
             sponsor_name TEXT NOT NULL,
             image_url TEXT,
             target_url TEXT NOT NULL,
-            position TEXT DEFAULT 'top_banner', -- 'top_banner', 'search_inline', 'sidebar'
+            position TEXT DEFAULT 'top_banner',
             active BOOLEAN DEFAULT 1,
             clicks INTEGER DEFAULT 0,
             impressions INTEGER DEFAULT 0,
@@ -137,4 +142,4 @@ def init_db():
 
 if __name__ == "__main__":
     init_db()
-    print("Banco de dados SQLite com FTS5 e WAL configurado com sucesso!")
+    print("Banco de dados SQLite configurado com sucesso!")

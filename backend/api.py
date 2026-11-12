@@ -5,17 +5,18 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import sys
 import sqlite3
+import json
+import urllib.parse
 from typing import Optional, List, Any
 import re
+import time
 
 # Garante que o diretório backend esteja no sys.path
 sys.path.append(os.path.dirname(__file__))
-from database import get_connection, db_transaction
+from database import get_connection, db_transaction, DB_PATH, PUBLIC_DB_PATH, RAW_DB_PATH
 import search_terms
-import crawlers.universal_crawler as universal_crawler
-import time
 
-app = FastAPI(title="CompraRibeirão API", version="1.0.0")
+app = FastAPI(title="CompraRibeirão - Inteligência Comercial Local", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,7 +26,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cache em memória para respostas instantâneas (elimina peso de banco de 400MB)
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+
+# Cache em memória para respostas instantâneas
 _RAM_CACHE = {}
 
 def get_from_cache(key: str, ttl_seconds: int = 300):
@@ -37,40 +40,23 @@ def get_from_cache(key: str, ttl_seconds: int = 300):
 def set_in_cache(key: str, data: Any):
     _RAM_CACHE[key] = {"data": data, "time": time.time()}
 
-@app.get("/api/search-terms")
-def get_terms():
-    return search_terms.list_search_terms()
-
-@app.post("/api/search-terms")
-def create_term(term: str = Query(..., description="Novo termo de busca"), category: str = Query("Geral", description="Categoria do setor")):
-    search_terms.add_search_term(term, category)
-    return {"status": "success", "message": f"Termo '{term}' adicionado com sucesso!"}
-
-@app.post("/api/ingest-discovered")
-async def trigger_ingestion():
-    import asyncio
-    asyncio.create_task(universal_crawler.ingest_all_discovered_with_websites())
-    return {"status": "success", "message": "Captura de produtos das lojas descobertas iniciada em segundo plano!"}
-
-@app.get("/api/discovered")
-def get_discovered_stores():
-    with db_transaction() as conn:
-        c = conn.cursor()
-        c.execute("SELECT * FROM discovered_stores ORDER BY id DESC")
-        return [dict(r) for r in c.fetchall()]
-
-@app.post("/api/discover")
-async def trigger_discovery(query: str = Query(..., description="Termo para buscar no Google Maps (ex: pet shop, games, sapatos)")):
-    from discovery_gmaps import scrape_google_maps_stores
-    results = await scrape_google_maps_stores(query, max_results=12)
-    return {
-        "status": "success",
-        "query": query,
-        "discovered_count": len(results),
-        "stores": results
-    }
-
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+def format_whatsapp_url(phone: str, store_name: str, query: Optional[str] = None) -> str:
+    """Gera link direto para WhatsApp com mensagem personalizada."""
+    if not phone:
+        return ""
+    clean_digits = re.sub(r"\D", "", phone)
+    if not clean_digits:
+        return ""
+    if not clean_digits.startswith("55"):
+        clean_digits = "55" + clean_digits
+    
+    if query:
+        msg = f"Olá, vi sua loja ({store_name}) no CompraRibeirão e gostaria de saber sobre disponibilidade de '{query}'."
+    else:
+        msg = f"Olá, vi sua loja ({store_name}) no CompraRibeirão e gostaria de tirar uma dúvida."
+    
+    encoded_msg = urllib.parse.quote(msg)
+    return f"https://wa.me/{clean_digits}?text={encoded_msg}"
 
 @app.get("/api/stats")
 def get_stats():
@@ -80,61 +66,73 @@ def get_stats():
 
     with db_transaction() as conn:
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM products WHERE in_stock = 1")
-        total_products = c.fetchone()[0]
         
+        # Total de lojas
         c.execute("SELECT COUNT(*) FROM stores")
         total_stores = c.fetchone()[0]
         
-        c.execute("SELECT COUNT(DISTINCT neighborhood) FROM stores WHERE neighborhood IS NOT NULL")
+        # Total de bairros
+        c.execute("SELECT COUNT(DISTINCT neighborhood) FROM stores WHERE neighborhood IS NOT NULL AND neighborhood != ''")
         total_neighborhoods = c.fetchone()[0]
         
+        # Lojas com catálogo detalhado
+        try:
+            c.execute("SELECT COUNT(*) FROM stores WHERE has_catalog = 1")
+            with_catalog = c.fetchone()[0]
+        except Exception:
+            with_catalog = 0
+            
         result = {
-            "products_count": total_products,
             "stores_count": total_stores,
             "neighborhoods_count": total_neighborhoods,
-            "city": "Ribeirão Preto - SP"
+            "catalog_stores_count": with_catalog,
+            "city": "Ribeirão Preto - SP",
+            "version": "2.0-intel"
         }
         set_in_cache("stats", result)
         return result
 
 @app.get("/api/neighborhoods")
 def get_neighborhoods():
-    cached = get_from_cache("neighborhoods", ttl_seconds=600)
+    cached = get_from_cache("neighborhoods_v2", ttl_seconds=600)
     if cached:
         return cached
 
     with db_transaction() as conn:
         c = conn.cursor()
         c.execute("""
-        SELECT DISTINCT neighborhood 
+        SELECT neighborhood, COUNT(*) as store_count
         FROM stores 
-        WHERE neighborhood IS NOT NULL AND neighborhood != ''
-        ORDER BY neighborhood ASC
+        WHERE neighborhood IS NOT NULL AND neighborhood != '' AND neighborhood != 'Ribeirão Preto'
+        GROUP BY neighborhood
+        HAVING store_count >= 1
+        ORDER BY store_count DESC, neighborhood ASC
         """)
-        rows = [r[0] for r in c.fetchall()]
-        set_in_cache("neighborhoods", rows)
+        rows = [{"name": r[0], "count": r[1]} for r in c.fetchall()]
+        set_in_cache("neighborhoods_v2", rows)
         return rows
 
-@app.get("/api/stores")
-def get_stores():
-    cached = get_from_cache("stores", ttl_seconds=600)
+@app.get("/api/categories")
+def get_categories():
+    cached = get_from_cache("categories_list", ttl_seconds=600)
     if cached:
         return cached
 
-    with db_transaction() as conn:
-        c = conn.cursor()
-        c.execute("""
-        SELECT s.id, s.name, s.neighborhood, COUNT(p.id) as product_count 
-        FROM stores s 
-        JOIN products p ON s.id = p.store_id 
-        GROUP BY s.id
-        HAVING product_count > 0
-        ORDER BY s.is_sponsored DESC, s.name ASC
-        """)
-        rows = [dict(r) for r in c.fetchall()]
-        set_in_cache("stores", rows)
-        return rows
+    popular_categories = [
+        {"id": "auto", "name": "Peças & Automotivo", "icon": "fa-car", "query": "auto peças baterias pneus"},
+        {"id": "construcao", "name": "Construção & Tintas", "icon": "fa-trowel-bricks", "query": "materiais de construcao tintas hidráulica"},
+        {"id": "ferramentas", "name": "Ferramentas & Indústria", "icon": "fa-wrench", "query": "ferramentas makita furadeiras parafusos"},
+        {"id": "moveis", "name": "Móveis & Decoração", "icon": "fa-couch", "query": "moveis decoracao colchões cortinas"},
+        {"id": "eletro", "name": "Eletrodomésticos & Clima", "icon": "fa-snowflake", "query": "ar condicionado refrigeracao fogao"},
+        {"id": "informatica", "name": "Informática & Celulares", "icon": "fa-laptop", "query": "informatica computadores celulares telas"},
+        {"id": "musica", "name": "Instrumentos Musicais", "icon": "fa-guitar", "query": "instrumentos musicais violao audio som"},
+        {"id": "seguranca", "name": "Segurança & CFTV", "icon": "fa-video", "query": "cameras seguranca cftv alarmes interfonia"},
+        {"id": "piscinas", "name": "Piscinas & Lazer", "icon": "fa-water-ladder", "query": "piscinas produtos piscina cloro bombas"},
+        {"id": "oticas", "name": "Óticas & Óculos", "icon": "fa-glasses", "query": "oticas oculos lentes armacao"},
+        {"id": "festas", "name": "Festas & Embalagens", "icon": "fa-cake-candles", "query": "artigos para festas descartaveis embalagens"}
+    ]
+    set_in_cache("categories_list", popular_categories)
+    return popular_categories
 
 @app.get("/api/ads")
 def get_ads(position: Optional[str] = None):
@@ -145,135 +143,195 @@ def get_ads(position: Optional[str] = None):
 
     with db_transaction() as conn:
         c = conn.cursor()
-        if position:
-            c.execute("SELECT * FROM ad_banners WHERE active = 1 AND position = ? ORDER BY id DESC", (position,))
-        else:
-            c.execute("SELECT * FROM ad_banners WHERE active = 1 ORDER BY id DESC")
-        rows = [dict(r) for r in c.fetchall()]
+        try:
+            if position:
+                c.execute("SELECT * FROM ad_banners WHERE active = 1 AND position = ? ORDER BY id DESC", (position,))
+            else:
+                c.execute("SELECT * FROM ad_banners WHERE active = 1 ORDER BY id DESC")
+            rows = [dict(r) for r in c.fetchall()]
+        except Exception:
+            rows = []
+            
         set_in_cache(cache_key, rows)
         return rows
 
-@app.get("/api/search")
-def search_products(
-    q: Optional[str] = Query(None, description="Termo de pesquisa (ex: embreagem, porcelanato, parafuso)"),
-    store_id: Optional[str] = None,
-    neighborhood: Optional[str] = None,
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
+@app.get("/api/local-search")
+def local_search(
+    q: Optional[str] = Query(None, description="O que você procura em Ribeirão Preto (ex: makita, embreagem, porcelanato, piscina, bateria)"),
+    neighborhood: Optional[str] = Query(None, description="Filtrar por bairro em Ribeirão Preto"),
     limit: int = 40,
     offset: int = 0
 ):
-    # Se for a busca padrão da home page, usa cache em memória para entrega em 0.001s!
-    is_home_search = not q and not store_id and not neighborhood and min_price is None and max_price is None and offset == 0
-    if is_home_search:
-        cached = get_from_cache("home_search_40", ttl_seconds=300)
-        if cached:
-            return cached
+    """
+    Busca inteligente no comércio físico local de Ribeirão Preto.
+    Localiza lojas especializadas, estoques, marcas, bairros, telefones e rotas.
+    """
+    cache_key = f"local_search_{q}_{neighborhood}_{limit}_{offset}"
+    cached = get_from_cache(cache_key, ttl_seconds=120)
+    if cached:
+        return cached
+
     with db_transaction() as conn:
         c = conn.cursor()
 
+        # Verifica se temos a tabela FTS5 de lojas
+        c.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='stores_search_fts'")
+        has_fts = c.fetchone()[0] > 0
+
+        where_clauses = []
         params = []
-        where_clauses = ["p.in_stock = 1"]
 
-        if store_id:
-            where_clauses.append("p.store_id = ?")
-            params.append(store_id)
+        if neighborhood and neighborhood.strip():
+            where_clauses.append("s.neighborhood LIKE ?")
+            params.append(f"%{neighborhood.strip()}%")
 
-        if neighborhood:
-            where_clauses.append("s.neighborhood = ?")
-            params.append(neighborhood)
+        if q and q.strip() and has_fts:
+            # Tokenizar busca para FTS5
+            raw_words = re.findall(r'[a-zA-ZÀ-ÿ0-9]+', q.strip().lower())
+            # Filtrar palavras muito comuns
+            stopwords = {"de", "da", "do", "para", "com", "em", "ribeirao", "preto", "loja"}
+            words = [w for w in raw_words if w not in stopwords and len(w) > 1]
+            if not words:
+                words = raw_words
 
-        if min_price is not None:
-            where_clauses.append("p.price >= ?")
-            params.append(min_price)
+            fts_query = " ".join([f'"{w}"*' for w in words])
+            where_clauses.append("stores_search_fts MATCH ?")
+            params.append(fts_query)
 
-        if max_price is not None:
-            where_clauses.append("p.price <= ?")
-            params.append(max_price)
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
-        if q and q.strip():
-            words = re.findall(r'\w+', q.strip())
-            if words:
-                fts_query = " ".join([f'"{w}"*' for w in words])
-                where_clauses.append("products_fts MATCH ?")
-                params.append(fts_query)
-                
-                term_prefix = f"{words[0]}%"
-                term_contain = f"%{words[0]}%"
-                params.extend([term_prefix, term_contain])
-                
-                where_sql = " AND ".join(where_clauses)
-                query_sql = f"""
-                SELECT 
-                    p.*,
-                    s.name as store_name,
-                    s.neighborhood as store_neighborhood,
-                    s.address as store_address,
-                    s.whatsapp as store_whatsapp,
-                    s.logo_url as store_logo_url,
-                    s.is_sponsored as store_is_sponsored
-                FROM products_fts
-                JOIN products p ON products_fts.product_id = p.id
-                JOIN stores s ON p.store_id = s.id
-                WHERE {where_sql}
-                ORDER BY 
-                    (CASE WHEN p.title LIKE ? THEN 0 WHEN p.title LIKE ? THEN 1 ELSE 2 END),
-                    products_fts.rank ASC,
-                    (p.price > 0) DESC
-                LIMIT ? OFFSET ?
-                """
-                params.extend([limit, offset])
-        else:
-            where_sql = " AND ".join(where_clauses)
             query_sql = f"""
             SELECT 
-                p.*,
-                s.name as store_name,
-                s.neighborhood as store_neighborhood,
-                s.address as store_address,
-                s.whatsapp as store_whatsapp,
-                s.logo_url as store_logo_url,
-                s.is_sponsored as store_is_sponsored
-            FROM products p
-            JOIN stores s ON p.store_id = s.id
+                s.id, s.name, s.slug, s.category, s.neighborhood, s.address, s.city, s.state,
+                s.whatsapp, s.website, s.logo_url, s.latitude, s.longitude,
+                s.is_sponsored, s.has_catalog, s.product_count,
+                s.top_categories, s.top_brands, s.keywords, s.ai_summary, s.sample_products,
+                bm25(stores_search_fts) as search_rank
+            FROM stores_search_fts
+            JOIN stores s ON stores_search_fts.store_id = s.id
             WHERE {where_sql}
-            ORDER BY s.is_sponsored DESC, (p.price > 0) DESC, p.updated_at DESC
+            ORDER BY 
+                s.is_sponsored DESC,
+                bm25(stores_search_fts) ASC,
+                s.has_catalog DESC,
+                s.name ASC
             LIMIT ? OFFSET ?
             """
             params.extend([limit, offset])
 
-        count_sql = f"""
-        SELECT COUNT(*) 
-        FROM products p
-        JOIN stores s ON p.store_id = s.id
-        {"JOIN products_fts ON p.id = products_fts.product_id" if (q and q.strip()) else ""}
-        WHERE {where_sql}
-        """
-        
-        if q and q.strip():
-            c.execute(count_sql, [fts_query])
+            count_sql = f"""
+            SELECT COUNT(*)
+            FROM stores_search_fts
+            JOIN stores s ON stores_search_fts.store_id = s.id
+            WHERE {where_sql}
+            """
+            c.execute(count_sql, params[:-2])
+            total_found = c.fetchone()[0]
+
         else:
-            where_params = params[:-2]
-            c.execute(count_sql, where_params)
-        
-        total_found = c.fetchone()[0]
+            # Busca geral sem termo ou com filtro de bairro
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+            query_sql = f"""
+            SELECT 
+                s.id, s.name, s.slug, s.category, s.neighborhood, s.address, s.city, s.state,
+                s.whatsapp, s.website, s.logo_url, s.latitude, s.longitude,
+                s.is_sponsored, s.has_catalog, s.product_count,
+                s.top_categories, s.top_brands, s.keywords, s.ai_summary, s.sample_products,
+                0 as search_rank
+            FROM stores s
+            WHERE {where_sql}
+            ORDER BY 
+                s.is_sponsored DESC,
+                s.has_catalog DESC,
+                s.name ASC
+            LIMIT ? OFFSET ?
+            """
+            params.extend([limit, offset])
+
+            count_sql = f"SELECT COUNT(*) FROM stores s WHERE {where_sql}"
+            c.execute(count_sql, params[:-2])
+            total_found = c.fetchone()[0]
 
         c.execute(query_sql, params)
-        results = [dict(r) for r in c.fetchall()]
+        raw_rows = [dict(r) for r in c.fetchall()]
 
-        response_data = {
+        # Processar cada loja para a interface
+        stores_list = []
+        for r in raw_rows:
+            # WhatsApp link
+            phone = r.get("whatsapp") or ""
+            r["whatsapp_url"] = format_whatsapp_url(phone, r.get("name", "Loja"), q)
+            
+            # Formatar telefone legível (ex: (16) 99223-1607)
+            clean_digits = re.sub(r"\D", "", phone)
+            num_clean = clean_digits[2:] if clean_digits.startswith("55") else clean_digits
+            if len(num_clean) in (10, 11):
+                ddd = num_clean[:2]
+                num = num_clean[2:]
+                if len(num) == 9:
+                    r["phone_display"] = f"({ddd}) {num[:5]}-{num[5:]}"
+                else:
+                    r["phone_display"] = f"({ddd}) {num[:4]}-{num[4:]}"
+            else:
+                r["phone_display"] = phone or "Consulte via WhatsApp"
+
+            # Parse de sample_products JSON
+            if r.get("sample_products"):
+                try:
+                    r["sample_products"] = json.loads(r["sample_products"])
+                except Exception:
+                    r["sample_products"] = []
+            else:
+                r["sample_products"] = []
+
+            # Sanitizar marcas e categorias em listas limpas
+            brands_str = r.get("top_brands") or ""
+            r["brands_list"] = [b.strip() for b in brands_str.split(",") if b.strip()][:8]
+
+            cats_str = r.get("top_categories") or ""
+            r["categories_list"] = [c.strip() for c in cats_str.split(",") if c.strip()][:6]
+
+            stores_list.append(r)
+
+        result_payload = {
             "query": q,
+            "neighborhood": neighborhood,
             "total": total_found,
-            "count": len(results),
+            "count": len(stores_list),
             "limit": limit,
             "offset": offset,
-            "results": results
+            "stores": stores_list
         }
 
-        if is_home_search:
-            set_in_cache("home_search_40", response_data)
+        set_in_cache(cache_key, result_payload)
+        return result_payload
 
-        return response_data
+@app.get("/api/search")
+def search_bridge(
+    q: Optional[str] = Query(None),
+    neighborhood: Optional[str] = None,
+    limit: int = 40,
+    offset: int = 0
+):
+    """Bridge de compatibilidade para buscas de produtos."""
+    return local_search(q=q, neighborhood=neighborhood, limit=limit, offset=offset)
+
+@app.get("/api/stores")
+def get_stores():
+    cached = get_from_cache("all_stores_simple", ttl_seconds=600)
+    if cached:
+        return cached
+
+    with db_transaction() as conn:
+        c = conn.cursor()
+        c.execute("""
+        SELECT id, name, neighborhood, category, is_sponsored, has_catalog, product_count
+        FROM stores
+        ORDER BY is_sponsored DESC, name ASC
+        """)
+        rows = [dict(r) for r in c.fetchall()]
+        set_in_cache("all_stores_simple", rows)
+        return rows
 
 # Serve frontend
 if os.path.exists(FRONTEND_DIR):

@@ -3,677 +3,688 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CompraRibeirão - Encontre o que precisa hoje em Ribeirão Preto</title>
+  <title>CompraRibeirão - Comércio Físico de Ribeirão Preto</title>
+  
+  <!-- Tailwind CSS & FontAwesome -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Google Fonts: Plus Jakarta Sans -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS & JS para Mapa Local Leve -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
     .ad-gradient { background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1); }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
   <!-- TOP BAR / NOTIFICAÇÃO LOCAL -->
-  <header class="bg-indigo-900 text-white text-xs py-1.5 px-4">
-    <div class="max-w-6xl mx-auto flex items-center justify-between">
+  <header class="bg-indigo-950 text-white text-xs py-1.5 px-4 border-b border-indigo-900">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
       <div class="flex items-center gap-2">
         <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span class="font-medium">CompraRibeirão • Catálogo em tempo real do comércio de Ribeirão Preto - SP</span>
+        <span class="font-medium">CompraRibeirão • Encontre no Comércio Físico de Ribeirão Preto - SP</span>
       </div>
       <div id="stats-badge" class="hidden sm:block text-slate-300 font-semibold">
-        +158.000 produtos cadastrados • 710 lojas em 148 bairros de RP
+        710 lojas físicas • 148 bairros de RP • Conexão WhatsApp
       </div>
     </div>
   </header>
 
-  <!-- NAVBAR -->
+  <!-- NAVBAR COM A LOGO OFICIAL DO COMPRARIBEIRÃO -->
   <nav class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
-    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-md">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      
+      <!-- LOGO -->
+      <a href="/" class="flex items-center gap-3 group">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-md group-hover:scale-105 transition-transform">
           <i class="fa-solid fa-location-dot"></i>
         </div>
         <div>
           <span class="text-xl font-extrabold tracking-tight text-slate-900">Compra<span class="text-blue-600">Ribeirão</span></span>
-          <span class="block text-[10px] uppercase font-bold tracking-wider text-slate-400">Comércio Local Conectado</span>
+          <span class="block text-[10px] uppercase font-bold tracking-wider text-slate-400">Comércio Local Físico</span>
         </div>
-      </div>
+      </a>
 
-      <!-- BOTÃO ANUNCIE AQUI / MONETIZAÇÃO -->
-      <div class="flex items-center gap-2">
-        <button onclick="toggleModalLojista()" class="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3.5 py-2 rounded-lg transition-all">
-          <i class="fa-solid fa-bullhorn"></i>
-          Anuncie sua Loja
+      <!-- AÇÕES / MONETIZAÇÃO -->
+      <div class="flex items-center gap-3">
+        <button onclick="toggleModalLojista()" class="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3.5 py-2 rounded-xl transition-all shadow-sm">
+          <i class="fa-solid fa-store"></i>
+          <span>Cadastre sua Loja</span>
         </button>
       </div>
     </div>
   </nav>
 
-  <!-- BANNER PUBLICITÁRIO PATROCINADO (EXEMPLO DE MONETIZAÇÃO) -->
-  <div class="max-w-6xl mx-auto px-4 mt-4 w-full">
-    <div id="ad-banner" class="ad-gradient rounded-2xl p-4 sm:p-6 text-white shadow-lg relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4">
+  <!-- BANNER PUBLICITÁRIO PATROCINADO (LOJA EM DESTAQUE) -->
+  <div class="max-w-7xl mx-auto px-4 mt-4 w-full">
+    <div id="ad-banner" class="ad-gradient rounded-2xl p-4 sm:p-5 text-white shadow-md relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4">
       <div class="absolute -right-10 -bottom-10 w-44 h-44 bg-white/10 rounded-full blur-xl pointer-events-none"></div>
       <div class="relative z-10">
-        <div class="inline-flex items-center gap-1.5 bg-white/20 text-blue-100 text-[11px] font-bold px-2.5 py-0.5 rounded-full mb-2">
-          <i class="fa-solid fa-star text-amber-300"></i> Destaque da Semana em Ribeirão
+        <div class="inline-flex items-center gap-1.5 bg-white/20 text-blue-100 text-[10px] font-bold px-2.5 py-0.5 rounded-full mb-1.5">
+          <i class="fa-solid fa-star text-amber-300"></i> Destaque do Comércio Ribeirão-pretano
         </div>
-        <h2 id="ad-title" class="text-lg sm:text-xl font-bold leading-snug">Tintas e Acabamento com Entrega Rápida em Ribeirão</h2>
-        <p id="ad-subtitle" class="text-xs text-blue-100 mt-1">Anúncio exclusivo • Loja parceira em Ribeirão: Babá Materiais de Construção</p>
+        <h2 id="ad-title" class="text-base sm:text-lg font-bold leading-snug">Babá Materiais de Construção & Reforma</h2>
+        <p id="ad-subtitle" class="text-xs text-blue-100 mt-0.5">Tintas, pisos, hidráulica e acabamentos com pronta entrega no Campos Elísios</p>
       </div>
-      <a id="ad-link" href="#" target="_blank" class="relative z-10 shrink-0 bg-white text-blue-900 hover:bg-blue-50 font-bold text-xs sm:text-sm px-5 py-2.5 rounded-xl shadow transition-transform active:scale-95 flex items-center gap-2">
-        <span>Conhecer Loja</span>
-        <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
+      <a id="ad-link" href="https://wa.me/5516992231607?text=Ol%C3%A1%2C%20vi%20o%20Bab%C3%A1%20no%20CompraRibeir%C3%A3o%20e%20gostaria%20de%20um%20or%C3%A7amento." target="_blank" class="relative z-10 shrink-0 bg-white text-blue-900 hover:bg-blue-50 font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow transition-transform active:scale-95 flex items-center gap-2">
+        <i class="fa-brands fa-whatsapp text-emerald-600 text-base"></i>
+        <span>Falar no WhatsApp</span>
       </a>
     </div>
   </div>
 
-  <!-- HERO BUSCA -->
-  <main class="max-w-6xl mx-auto px-4 py-6 w-full flex-1">
-    
-    <!-- BARRA DE PESQUISA PRINCIPAL -->
+  <!-- SEÇÃO DE BUSCA LOCAL -->
+  <section class="max-w-7xl mx-auto px-4 pt-5 pb-2 w-full">
     <div class="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
-      <h1 class="text-xl sm:text-2xl font-black text-slate-900 mb-2">O que você precisa comprar hoje em Ribeirão?</h1>
-      <p class="text-xs sm:text-sm text-slate-500 mb-4">Veja onde tem estoque agora nas lojas físicas da cidade sem precisar ligar ou sair de casa.</p>
       
-      <div class="relative flex items-center">
-        <i class="fa-solid fa-magnifying-glass absolute left-4 text-slate-400 text-lg"></i>
-        <input 
-          type="text" 
-          id="search-input" 
-          placeholder="Ex: embreagem gol, porcelanato acetinado, torneira, adaptador..."
-          class="w-full pl-12 pr-28 py-3.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-sm sm:text-base font-medium transition-all"
-        />
-        <button 
-          id="btn-search"
-          onclick="executeSearch()"
-          class="absolute right-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-lg shadow transition-colors"
-        >
-          Buscar
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-4">
+        <div>
+          <h1 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">O que você precisa comprar ou consertar em Ribeirão?</h1>
+          <p class="text-xs sm:text-sm text-slate-500 mt-0.5">Descubra quais lojas físicas têm o que você busca, no seu bairro, com telefone e WhatsApp direto.</p>
+        </div>
+      </div>
+
+      <!-- CAMPOS DE BUSCA E BAIRRO -->
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <!-- Input de busca -->
+        <div class="md:col-span-8 relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-base"></i>
+          <input 
+            type="text" 
+            id="search-input" 
+            placeholder="Ex: bateria heliar, porcelanato, embreagem, makita, piscina, sofá..."
+            class="w-full pl-11 pr-24 py-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm font-medium transition-all"
+            onkeydown="if(event.key === 'Enter') executeSearch()"
+          />
+          <button 
+            onclick="executeSearch()"
+            class="absolute right-1.5 top-1/2 -translate-y-1/2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow transition-colors flex items-center gap-1.5"
+          >
+            <span>Buscar</span>
+          </button>
+        </div>
+
+        <!-- Seletor de Bairro -->
+        <div class="md:col-span-4 relative">
+          <i class="fa-solid fa-location-dot absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+          <select 
+            id="filter-neighborhood" 
+            onchange="executeSearch()" 
+            class="w-full pl-9 pr-8 py-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-700 text-xs sm:text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 appearance-none cursor-pointer"
+          >
+            <option value="">Todos os Bairros de Ribeirão</option>
+          </select>
+          <i class="fa-solid fa-chevron-down absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+        </div>
+      </div>
+
+      <!-- CATEGORIAS POPULARES / ATALHOS -->
+      <div class="flex items-center gap-2 mt-4 pt-3 border-t border-slate-100 overflow-x-auto pb-1 text-xs no-scrollbar">
+        <span class="text-slate-400 font-bold shrink-0 text-[11px] uppercase tracking-wider">Setores:</span>
+        <button onclick="setSearchTerm('bateria automotiva')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-car-battery text-blue-600"></i> Baterias
+        </button>
+        <button onclick="setSearchTerm('materiais de construcao tintas')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-trowel-bricks text-blue-600"></i> Tintas & Pisos
+        </button>
+        <button onclick="setSearchTerm('ferramentas makita furadeira')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-wrench text-blue-600"></i> Ferramentas
+        </button>
+        <button onclick="setSearchTerm('auto pecas')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-car text-blue-600"></i> Autopeças
+        </button>
+        <button onclick="setSearchTerm('produtos piscina')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-water-ladder text-blue-600"></i> Piscinas
+        </button>
+        <button onclick="setSearchTerm('cameras seguranca cftv')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-video text-blue-600"></i> Segurança & CFTV
+        </button>
+        <button onclick="setSearchTerm('colchoes camas')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-bed text-blue-600"></i> Colchões
+        </button>
+        <button onclick="setSearchTerm('instrumentos musicais')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
+          <i class="fa-solid fa-guitar text-blue-600"></i> Instrumentos
         </button>
       </div>
 
-      <!-- TAGS RÁPIDAS -->
-      <div class="flex items-center gap-2 mt-3 flex-wrap text-xs">
-        <span class="text-slate-400 font-medium">Buscas em alta:</span>
-        <button onclick="setQuery('chuveiro')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-medium transition-colors">Chuveiro</button>
-        <button onclick="setQuery('teclado')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-medium transition-colors">Teclados Raicrom</button>
-        <button onclick="setQuery('ssd')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-medium transition-colors">SSD / Notebook</button>
-        <button onclick="setQuery('amortecedor')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-medium transition-colors">Amortecedores</button>
-        <button onclick="setQuery('torneira')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-medium transition-colors">Torneiras</button>
-        <button onclick="setQuery('embreagem')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-medium transition-colors">Embreagem Corsa</button>
-        <button onclick="setQuery('porcelanato')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-medium transition-colors">Porcelanatos</button>
-      </div>
-
-      <!-- FILTROS POR BAIRRO / LOJA (100% DINÂMICOS DO BANCO) -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-100">
-        <div>
-          <label class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Filtrar por Bairro em Ribeirão</label>
-          <select id="filter-neighborhood" onchange="executeSearch()" class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-lg px-3 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-blue-600">
-            <option value="">Todos os Bairros de Ribeirão Preto</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Filtrar por Loja</label>
-          <select id="filter-store" onchange="executeSearch()" class="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-lg px-3 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-blue-600">
-            <option value="">Todas as Lojas Locais</option>
-          </select>
-        </div>
-      </div>
     </div>
+  </section>
 
-    <!-- RESULTADOS -->
-    <div class="mt-8">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h2 id="results-heading" class="text-base font-bold text-slate-800">Produtos disponíveis nas lojas físicas:</h2>
-        <span id="results-count" class="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold"></span>
+  <!-- CORPO PRINCIPAL COM LISTA DE LOJAS E MAPA INTEGRADO -->
+  <main class="max-w-7xl mx-auto px-4 py-4 w-full flex-1">
+    
+    <!-- BARRA DE STATUS / ALTERNAR VISUALIZAÇÃO -->
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <div class="flex items-center gap-2">
+        <h2 id="results-title" class="text-base font-bold text-slate-800">Lojas Físicas Encontradas:</h2>
+        <span id="results-count" class="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold border border-blue-200">
+          Carregando...
+        </span>
       </div>
 
-      <!-- GRID DE PRODUTOS -->
-      <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        <!-- Injetado via Javascript -->
-      </div>
-
-      <!-- BOTÃO CARREGAR MAIS -->
-      <div id="load-more-container" class="mt-8 text-center hidden">
-        <button onclick="loadMoreProducts()" id="btn-load-more" class="px-6 py-3 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs sm:text-sm border border-slate-300 rounded-xl shadow-sm transition-all hover:shadow">
-          <i class="fa-solid fa-plus mr-1"></i> Carregar Mais Produtos
+      <!-- BOTÕES DE CONTROLE DA VISUALIZAÇÃO -->
+      <div class="flex items-center bg-white border border-slate-200 rounded-xl p-1 shadow-sm text-xs font-semibold text-slate-600">
+        <button id="view-split" onclick="setViewMode('split')" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-table-columns"></i>
+          <span class="hidden sm:inline">Lista & Mapa</span>
+        </button>
+        <button id="view-list" onclick="setViewMode('list')" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-list"></i>
+          <span class="hidden sm:inline">Apenas Lojas</span>
+        </button>
+        <button id="view-map" onclick="setViewMode('map')" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-map-location-dot"></i>
+          <span class="hidden sm:inline">Apenas Mapa</span>
         </button>
       </div>
-
-      <!-- ESTADO VAZIO -->
-      <div id="empty-state" class="hidden text-center py-16 bg-white rounded-2xl border border-slate-200">
-        <div class="w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">
-          <i class="fa-solid fa-box-open"></i>
-        </div>
-        <h3 class="text-base font-bold text-slate-800">Nenhum produto encontrado</h3>
-        <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">Tente buscar por termos mais genéricos como "freio", "óleo", "tubo", "revestimento" ou limpe os filtros de bairro.</p>
-      </div>
     </div>
+
+    <!-- CONTAINER DE 2 COLUNAS: LISTA DE LOJAS + MAPA LEAFLET -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      
+      <!-- COLUNA DA ESQUERDA: LISTA DE LOJAS FÍSICAS (60% NO SPLIT) -->
+      <div id="col-stores" class="lg:col-span-7 space-y-4">
+        <div id="stores-container" class="space-y-4">
+          <!-- Injetado dinamicamente via JS -->
+        </div>
+
+        <!-- BOTÃO CARREGAR MAIS LOJAS -->
+        <div id="load-more-container" class="text-center pt-4 pb-8 hidden">
+          <button onclick="loadMore()" class="px-6 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl shadow-sm transition-all hover:shadow">
+            <i class="fa-solid fa-plus mr-1"></i> Carregar Mais Estabelecimentos
+          </button>
+        </div>
+
+        <!-- ESTADO VAZIO -->
+        <div id="empty-state" class="hidden text-center py-16 bg-white rounded-2xl border border-slate-200 p-6">
+          <div class="w-14 h-14 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">
+            <i class="fa-solid fa-store-slash"></i>
+          </div>
+          <h3 class="text-base font-bold text-slate-800">Nenhum comércio físico encontrado para essa busca</h3>
+          <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">Tente buscar por termos mais amplos (ex: "bateria", "tinta", "ferramentas") ou selecione outro bairro.</p>
+          <button onclick="resetFilters()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors">
+            Ver Todas as Lojas
+          </button>
+        </div>
+      </div>
+
+      <!-- COLUNA DA DIREITA: MAPA INTERATIVO LEAFLET (40% NO SPLIT, FIXO NA TELA) -->
+      <div id="col-map" class="lg:col-span-5 sticky top-20">
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 overflow-hidden">
+          <div class="flex items-center justify-between mb-2 px-1">
+            <span class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-map-pin text-blue-600"></i> Mapa de Ribeirão Preto
+            </span>
+            <span id="map-counter" class="text-[11px] text-slate-400 font-medium">0 pontos no mapa</span>
+          </div>
+
+          <!-- MAP DIV -->
+          <div id="leaflet-map" class="w-full h-[520px] rounded-xl bg-slate-100 border border-slate-200 z-10"></div>
+          
+          <div class="text-[11px] text-slate-400 text-center mt-2">
+            Clique em qualquer ponto do mapa para ver telefone e rota até a loja.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
   </main>
 
-  <!-- MODAL DE COMO FUNCIONA A MONETIZAÇÃO / PARA O LOJISTA -->
-  <div id="modal-lojista" class="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 hidden backdrop-blur-sm">
-    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
-      <button onclick="toggleModalLojista()" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600">
-        <i class="fa-solid fa-xmark text-lg"></i>
+  <!-- MODAL: ANUNCIE SUA LOJA / CADASTRO -->
+  <div id="modal-lojista" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+      <button onclick="toggleModalLojista()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-lg">
+        <i class="fa-solid fa-xmark"></i>
       </button>
-      
-      <div class="flex items-center gap-2 text-blue-600 font-bold text-xs uppercase tracking-wider mb-2">
-        <i class="fa-solid fa-chart-line"></i> Modelo de Publicidade CompraRibeirão
+      <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl mb-3">
+        <i class="fa-solid fa-bullhorn"></i>
       </div>
-      <h3 class="text-xl font-black text-slate-900 mb-3">Como sua loja pode faturar mais com anúncios locais?</h3>
+      <h3 class="text-lg font-bold text-slate-900">Cadastre ou Destaque sua Loja Física</h3>
+      <p class="text-xs text-slate-500 mt-1">Conecte sua empresa aos consumidores que estão procurando exatamente o que você vende em Ribeirão Preto.</p>
       
-      <div class="space-y-3 text-xs text-slate-600 mb-6">
-        <div class="p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-start gap-3">
-          <i class="fa-solid fa-check-circle text-blue-600 text-base mt-0.5"></i>
-          <div>
-            <strong class="text-slate-800 block text-sm">Destaque de Busca (Patrocinado)</strong>
-            Seus produtos aparecem em primeiro quando alguém de Ribeirão pesquisar pela sua categoria.
-          </div>
+      <div class="mt-4 space-y-3">
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+          <span class="font-bold text-slate-800 block">✓ Destaque no seu bairro</span>
+          <span class="text-slate-500">Apareça no topo quando clientes buscarem no seu bairro.</span>
         </div>
-
-        <div class="p-3 bg-indigo-50 rounded-xl border border-indigo-100 flex items-start gap-3">
-          <i class="fa-solid fa-whatsapp text-emerald-600 text-base mt-0.5"></i>
-          <div>
-            <strong class="text-slate-800 block text-sm">Botão WhatsApp Direto para Venda</strong>
-            O cliente clica e cai direto na conversa com o vendedor da sua loja física para fechar a compra na hora.
-          </div>
-        </div>
-
-        <div class="p-3 bg-amber-50 rounded-xl border border-amber-100 flex items-start gap-3">
-          <i class="fa-solid fa-bolt text-amber-600 text-base mt-0.5"></i>
-          <div>
-            <strong class="text-slate-800 block text-sm">Banner Patrocinado Principal</strong>
-            Espaço de destaque no topo do site para campanhas semanais ou mensais da sua empresa.
-          </div>
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+          <span class="font-bold text-slate-800 block">✓ Conexão direta no WhatsApp</span>
+          <span class="text-slate-500">Sem taxas de intermediação. O cliente fala direto com você.</span>
         </div>
       </div>
 
-      <button onclick="toggleModalLojista()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow">
-        Entendi! Fechar janela
-      </button>
+      <div class="mt-6 flex flex-col gap-2">
+        <a href="https://wa.me/5516992231607?text=Ol%C3%A1%2C%20tenho%20uma%20loja%20em%20Ribeir%C3%A3o%20Preto%20e%20gostaria%20de%20anunciar%20no%20CompraRibeir%C3%A3o." target="_blank" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow text-center flex items-center justify-center gap-2 transition-all">
+          <i class="fa-brands fa-whatsapp text-base"></i>
+          Falar com Nossa Equipe
+        </a>
+        <button onclick="toggleModalLojista()" class="w-full py-2.5 text-xs text-slate-500 font-bold hover:bg-slate-100 rounded-xl transition-colors">
+          Fechar
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- FOOTER -->
-  <footer class="bg-white border-t border-slate-200 mt-12 py-8 text-xs text-slate-500">
-    <div class="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
-      <div>
-        <p class="font-bold text-slate-800">CompraRibeirão © 2026</p>
-        <p>Conectando o consumidor de Ribeirão Preto ao estoque real das lojas locais.</p>
+  <footer class="bg-slate-900 text-slate-400 text-xs py-8 mt-12 border-t border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm">
+          <i class="fa-solid fa-location-dot"></i>
+        </div>
+        <span class="font-bold text-white text-sm">CompraRibeirão</span>
+        <span class="text-slate-500">| Apoio e fortalecimento do comércio físico local de Ribeirão Preto - SP.</span>
       </div>
-      <div class="flex items-center gap-4">
-        <span>Catálogo Oficial do Comércio de Ribeirão</span>
-        <span>•</span>
-        <button onclick="toggleModalDescobridor()" class="text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1">
-          <i class="fa-solid fa-lock text-[10px]"></i> Painel Admin
-        </button>
+      <div>
+        <span>Feito com foco no comerciante e consumidor de RP • 2026</span>
       </div>
     </div>
   </footer>
 
-  <!-- MODAL DESCOBRIDOR DE LOJAS (CUSTO ZERO NO MAPS) -->
-  <div id="modal-descobridor" class="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 hidden backdrop-blur-sm">
-    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
-      <button onclick="toggleModalDescobridor()" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600">
-        <i class="fa-solid fa-xmark text-lg"></i>
-      </button>
-      
-      <div class="flex items-center gap-2 text-indigo-600 font-bold text-xs uppercase tracking-wider mb-1">
-        <i class="fa-solid fa-satellite-dish"></i> Radar de Lojas em Ribeirão Preto (Custo Zero)
-      </div>
-      <h3 class="text-lg font-black text-slate-900 mb-1">Descobridor de Lojas & Captura de Catálogos</h3>
-      <p class="text-xs text-slate-500 mb-3">Encontre lojas no Google Maps e capture automaticamente os catálogos dos e-commerces da cidade.</p>
-      
-      <!-- ABAS DENTRO DO MODAL -->
-      <div class="flex items-center gap-2 border-b border-slate-200 pb-2 mb-3 text-xs">
-        <button id="tab-btn-stores" onclick="switchDiscoverTab('stores')" class="font-bold text-indigo-600 border-b-2 border-indigo-600 pb-1">Lojas Descobertas</button>
-        <button id="tab-btn-sectors" onclick="switchDiscoverTab('sectors')" class="font-medium text-slate-500 hover:text-slate-800 pb-1">Base de Setores Padrão</button>
-      </div>
-
-      <!-- ABA 1: LOJAS DESCOBERTAS -->
-      <div id="tab-content-stores" class="flex flex-col flex-1 overflow-hidden">
-        <div class="flex gap-2 mb-3">
-          <input 
-            type="text" 
-            id="discover-input" 
-            placeholder="Ex: pet shop, bicicletaria, ótica, games..." 
-            class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600"
-          />
-          <button 
-            id="btn-discover"
-            onclick="runDiscovery()" 
-            class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition-colors shrink-0 flex items-center gap-1.5"
-          >
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <span>Varrer Mapa</span>
-          </button>
-        </div>
-
-        <div class="flex items-center justify-between py-2 border-y border-slate-100 mb-2">
-          <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Lojas no Banco</span>
-          <button onclick="triggerProductsCapture()" id="btn-capture-all" class="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors">
-            <i class="fa-solid fa-bolt"></i>
-            <span>Capturar Catálogos de Todas</span>
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-y-auto pr-1">
-          <div id="discovered-list" class="space-y-2 text-xs">
-            <!-- Injetado via JS -->
-          </div>
-        </div>
-      </div>
-
-      <!-- ABA 2: BASE DE SETORES PADRÕES -->
-      <div id="tab-content-sectors" class="hidden flex-col flex-1 overflow-hidden">
-        <p class="text-xs text-slate-500 mb-3">Estes são os termos de busca padrão do comércio de Ribeirão. Você pode adicionar novos setores a qualquer momento.</p>
-        
-        <div class="flex gap-2 mb-3">
-          <input 
-            type="text" 
-            id="new-term-input" 
-            placeholder="Novo termo (ex: padarias artesanais ribeirao preto)" 
-            class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600"
-          />
-          <input 
-            type="text" 
-            id="new-term-cat" 
-            placeholder="Setor (ex: Alimentos)" 
-            class="w-32 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600"
-          />
-          <button onclick="addNewTerm()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl">
-            <i class="fa-solid fa-plus"></i> Adicionar
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-y-auto pr-1">
-          <div id="sectors-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            <!-- Injetado via JS -->
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
+  <!-- JAVASCRIPT DO SISTEMA -->
   <script>
-    let searchTimeout = null;
-
+    let currentQuery = '';
+    let currentNeighborhood = '';
     let currentOffset = 0;
-    const PAGE_LIMIT = 40;
-    let currentTotal = 0;
+    const limit = 30;
+    let totalStores = 0;
+    let storesData = [];
+    let leafletMap = null;
+    let markersLayer = null;
+    let currentViewMode = 'split';
 
+    // Inicialização do Mapa
+    function initMap() {
+      // Coordenadas centrais de Ribeirão Preto
+      leafletMap = L.map('leaflet-map').setView([-21.1775, -47.8103], 12);
+      
+      // Camada CartoDB Positron (visual moderno, limpo e leve)
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+        maxZoom: 19
+      }).addTo(leafletMap);
+
+      markersLayer = L.layerGroup().addTo(leafletMap);
+    }
+
+    // Atualização dos Marcadores no Mapa
+    function updateMapMarkers(stores) {
+      if (!markersLayer) return;
+      markersLayer.clearLayers();
+
+      const validCoords = [];
+
+      stores.forEach((store, index) => {
+        if (store.latitude && store.longitude) {
+          const lat = parseFloat(store.latitude);
+          const lng = parseFloat(store.longitude);
+
+          if (!isNaN(lat) && !isNaN(lng)) {
+            validCoords.push([lat, lng]);
+
+            // Custom Icon
+            const isSponsored = store.is_sponsored === 1;
+            const markerColor = isSponsored ? '#f59e0b' : '#2563eb';
+            
+            const customIcon = L.divIcon({
+              className: 'custom-pin',
+              html: `
+                <div style="background-color: ${markerColor}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: 2px solid white; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); font-size: 12px; font-weight: bold;">
+                  <i class="fa-solid fa-store text-[11px]"></i>
+                </div>
+              `,
+              iconSize: [28, 28],
+              iconAnchor: [14, 14]
+            });
+
+            const marker = L.marker([lat, lng], { icon: customIcon });
+
+            // Popup com visual caprichado e botão direto de WhatsApp
+            const popupContent = `
+              <div class="p-1 max-w-[240px]">
+                <div class="font-bold text-sm text-slate-900 leading-tight">${store.name}</div>
+                <div class="text-xs text-blue-600 font-semibold mt-0.5"><i class="fa-solid fa-location-dot"></i> ${store.neighborhood || 'Ribeirão Preto'}</div>
+                <div class="text-[11px] text-slate-500 mt-1">${store.address || ''}</div>
+                ${store.phone_display ? `<div class="text-[11px] font-bold text-slate-700 mt-1"><i class="fa-solid fa-phone"></i> ${store.phone_display}</div>` : ''}
+                ${store.whatsapp_url ? `
+                  <a href="${store.whatsapp_url}" target="_blank" class="mt-2 block w-full py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-center font-bold text-xs rounded-lg shadow transition-colors">
+                    <i class="fa-brands fa-whatsapp mr-1"></i> Falar no WhatsApp
+                  </a>
+                ` : ''}
+              </div>
+            `;
+
+            marker.bindPopup(popupContent);
+            markersLayer.addLayer(marker);
+          }
+        }
+      });
+
+      document.getElementById('map-counter').innerText = `${validCoords.length} pontos no mapa`;
+
+      // Ajusta zoom e enquadramento automaticamente
+      if (validCoords.length > 0) {
+        const bounds = L.latLngBounds(validCoords);
+        leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+      } else {
+        leafletMap.setView([-21.1775, -47.8103], 12);
+      }
+    }
+
+    // Foca o mapa em uma loja específica ao clicar no card
+    function focusStoreOnMap(lat, lng, storeName) {
+      if (!leafletMap) return;
+      leafletMap.flyTo([lat, lng], 16, { duration: 1.2 });
+      
+      // Se estiver em mobile, faz scroll suave até o mapa
+      if (window.innerWidth < 1024) {
+        document.getElementById('col-map').scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+
+    // Carregar Bairros
+    async function loadNeighborhoods() {
+      try {
+        const res = await fetch('/api/neighborhoods');
+        const data = await res.json();
+        const select = document.getElementById('filter-neighborhood');
+        select.innerHTML = '<option value="">Todos os Bairros de Ribeirão Preto</option>';
+        data.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.name;
+          opt.textContent = `${item.name} (${item.count} lojas)`;
+          select.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Erro ao carregar bairros:', e);
+      }
+    }
+
+    // Carregar Estatísticas
     async function loadStats() {
       try {
         const res = await fetch('/api/stats');
         const data = await res.json();
-        const text = `${data.products_count.toLocaleString('pt-BR')} produtos cadastrados • ${data.stores_count} lojas em ${data.neighborhoods_count} bairros de RP`;
-        document.getElementById('stats-badge').innerText = text;
-        document.getElementById('stats-badge').classList.remove('hidden');
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    async function loadAdBanner() {
-      try {
-        const res = await fetch('/api/ads?position=top_banner');
-        const ads = await res.json();
-        if (ads.length > 0) {
-          const ad = ads[0];
-          document.getElementById('ad-title').innerText = ad.title;
-          document.getElementById('ad-subtitle').innerText = `Anúncio exclusivo • Loja parceira em Ribeirão: ${ad.sponsor_name}`;
-          document.getElementById('ad-link').href = ad.target_url;
+        if (data.stores_count) {
+          document.getElementById('stats-badge').innerText = `${data.stores_count} lojas físicas • ${data.neighborhoods_count} bairros de RP • Conexão WhatsApp`;
         }
       } catch (e) {
-        console.error(e);
+        console.error('Erro ao carregar stats:', e);
       }
     }
 
-    function setQuery(q) {
-      document.getElementById('search-input').value = q;
-      executeSearch();
-    }
-
-    async function executeSearch(isAppend = false) {
-      if (!isAppend) {
+    // Buscar Lojas Locais
+    async function executeSearch(isLoadMore = false) {
+      if (!isLoadMore) {
         currentOffset = 0;
+        storesData = [];
       }
 
-      const q = document.getElementById('search-input').value.trim();
-      const neighborhood = document.getElementById('filter-neighborhood').value;
-      const store = document.getElementById('filter-store').value;
+      currentQuery = document.getElementById('search-input').value.trim();
+      currentNeighborhood = document.getElementById('filter-neighborhood').value;
 
-      const grid = document.getElementById('products-grid');
+      const container = document.getElementById('stores-container');
+      const countBadge = document.getElementById('results-count');
       const emptyState = document.getElementById('empty-state');
-      const countEl = document.getElementById('results-count');
       const loadMoreContainer = document.getElementById('load-more-container');
 
-      if (!isAppend) {
-        grid.innerHTML = `
-          <div class="col-span-full py-12 text-center text-slate-400">
+      if (!isLoadMore) {
+        container.innerHTML = `
+          <div class="text-center py-12 text-slate-400">
             <i class="fa-solid fa-spinner fa-spin text-2xl text-blue-600 mb-2"></i>
-            <p class="text-xs">Consultando 36.000+ produtos em Ribeirão Preto...</p>
+            <p class="text-xs font-semibold">Localizando lojas especializadas em Ribeirão Preto...</p>
           </div>
         `;
       }
 
-      let url = `/api/search?limit=${PAGE_LIMIT}&offset=${currentOffset}`;
-      if (q) url += `&q=${encodeURIComponent(q)}`;
-      if (neighborhood) url += `&neighborhood=${encodeURIComponent(neighborhood)}`;
-      if (store) url += `&store_id=${encodeURIComponent(store)}`;
-
       try {
+        const url = `/api/local-search?q=${encodeURIComponent(currentQuery)}&neighborhood=${encodeURIComponent(currentNeighborhood)}&limit=${limit}&offset=${currentOffset}`;
         const res = await fetch(url);
         const data = await res.json();
-        
-        if (!isAppend) {
-          grid.innerHTML = '';
+
+        totalStores = data.total;
+        if (!isLoadMore) {
+          storesData = data.stores;
+        } else {
+          storesData = storesData.concat(data.stores);
         }
 
-        if (data.results.length === 0 && !isAppend) {
+        countBadge.innerText = `${totalStores} estabelecimentos`;
+
+        if (storesData.length === 0) {
+          container.innerHTML = '';
           emptyState.classList.remove('hidden');
-          countEl.innerText = '0 produtos';
           loadMoreContainer.classList.add('hidden');
+          updateMapMarkers([]);
           return;
         }
 
         emptyState.classList.add('hidden');
-        currentTotal = data.total || data.count;
-        const displayedCount = currentOffset + data.results.length;
-        
-        countEl.innerText = `Mostrando ${displayedCount.toLocaleString('pt-BR')} de ${currentTotal.toLocaleString('pt-BR')} produtos`;
 
-        if (displayedCount < currentTotal) {
+        // Renderizar Cards de Lojas
+        if (!isLoadMore) {
+          container.innerHTML = '';
+        } else {
+          // Remove spinner se houver
+        }
+
+        storesData.forEach(store => {
+          const card = createStoreCard(store);
+          container.appendChild(card);
+        });
+
+        // Atualiza Marcadores no Mapa
+        updateMapMarkers(storesData);
+
+        // Controlar botão Carregar Mais
+        if (storesData.length < totalStores) {
           loadMoreContainer.classList.remove('hidden');
         } else {
           loadMoreContainer.classList.add('hidden');
         }
 
-        data.results.forEach(p => {
-          renderProductCard(grid, p);
-        });
-
       } catch (e) {
-        console.error(e);
-        if (!isAppend) {
-          grid.innerHTML = '<div class="col-span-full py-8 text-center text-rose-500 text-xs">Erro ao consultar produtos.</div>';
-        }
+        console.error('Erro na busca:', e);
+        container.innerHTML = `
+          <div class="p-4 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
+            Erro ao carregar dados locais. Por favor tente novamente.
+          </div>
+        `;
       }
     }
 
-    function loadMoreProducts() {
-      currentOffset += PAGE_LIMIT;
-      executeSearch(true);
-    }
-
-    function renderProductCard(grid, p) {
+    // Criador do Card de Loja Física
+    function createStoreCard(store) {
       const card = document.createElement('div');
-      card.className = "bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition-all flex flex-col";
-      
-      const priceFormatted = p.price > 0 
-        ? `R$ ${p.price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        : "Consulte o Preço";
+      card.className = "bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-all relative overflow-hidden group";
 
-      const img = p.image_url || 'https://images.unsplash.com/photo-1581783898377-1c85bf937427?w=400&auto=format&fit=crop&q=80';
-      
-      const waMsg = encodeURIComponent(
-        `Olá! Vi no CompraRibeirão que vocês têm "${p.title}" por ${priceFormatted}. Tem disponível para retirada na loja hoje?`
-      );
-      const waLink = p.store_whatsapp 
-        ? `https://wa.me/${p.store_whatsapp}?text=${waMsg}`
-        : '#';
+      // Badge Patrocinada / Catálogo
+      let badgeHtml = '';
+      if (store.is_sponsored === 1) {
+        badgeHtml = `
+          <span class="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+            <i class="fa-solid fa-star text-amber-500"></i> Loja Patrocinada
+          </span>
+        `;
+      } else if (store.has_catalog === 1) {
+        badgeHtml = `
+          <span class="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+            <i class="fa-solid fa-boxes-stacked"></i> Catálogo Cadastrado (${store.product_count} itens)
+          </span>
+        `;
+      }
+
+      // Marcas
+      let brandsHtml = '';
+      if (store.brands_list && store.brands_list.length > 0) {
+        brandsHtml = `
+          <div class="flex items-center gap-1.5 flex-wrap mt-2.5 text-[11px]">
+            <span class="text-slate-400 font-semibold">Marcas:</span>
+            ${store.brands_list.slice(0, 5).map(b => `<span class="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded-md">${b}</span>`).join('')}
+          </div>
+        `;
+      }
+
+      // Amostras de produtos com foto e preço (se disponível)
+      let samplesHtml = '';
+      if (store.sample_products && store.sample_products.length > 0) {
+        samplesHtml = `
+          <div class="mt-3 pt-3 border-t border-slate-100">
+            <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Exemplos em Estoque:</div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              ${store.sample_products.slice(0, 3).map(p => `
+                <a href="${p.url}" target="_blank" class="bg-slate-50 hover:bg-slate-100 border border-slate-200 p-2 rounded-xl block transition-colors group/item">
+                  ${p.image ? `<img src="${p.image}" class="w-full h-16 object-contain rounded-lg mb-1.5 bg-white" loading="lazy" />` : ''}
+                  <div class="text-[11px] font-semibold text-slate-800 line-clamp-1 group-hover/item:text-blue-600">${p.title}</div>
+                  ${p.price ? `<div class="text-xs font-black text-emerald-600 mt-0.5">R$ ${p.price.toFixed(2)}</div>` : ''}
+                </a>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      // Botão de focar no mapa
+      const hasCoords = store.latitude && store.longitude;
 
       card.innerHTML = `
-        <div class="relative h-44 bg-slate-50 flex items-center justify-center p-3 border-b border-slate-100">
-          <img src="${img}" alt="${p.title}" class="max-h-full max-w-full object-contain mix-blend-multiply" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1581783898377-1c85bf937427?w=400&auto=format&fit=crop&q=80'">
-          ${p.store_is_sponsored ? `
-            <span class="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm">
-              ★ Patrocinado
-            </span>
-          ` : ''}
-          <span class="absolute bottom-2 right-2 bg-slate-900/80 backdrop-blur-sm text-white text-[10px] font-medium px-2 py-0.5 rounded-md">
-            <i class="fa-solid fa-location-dot text-rose-400"></i> ${p.store_neighborhood || 'Ribeirão'}
-          </span>
-        </div>
-        
-        <div class="p-4 flex-1 flex flex-col justify-between">
+        <div class="flex items-start justify-between gap-3">
           <div>
-            <div class="text-[11px] font-bold text-blue-600 mb-1 flex items-center justify-between">
-              <span class="truncate">${p.store_name}</span>
-            </div>
-            <h3 class="text-xs sm:text-sm font-bold text-slate-800 line-clamp-2 leading-snug mb-2" title="${p.title}">
-              ${p.title}
+            ${badgeHtml}
+            <h3 class="text-base sm:text-lg font-black text-slate-900 mt-1 group-hover:text-blue-600 transition-colors">
+              ${store.name}
             </h3>
+            <div class="flex items-center gap-1.5 text-xs text-blue-600 font-bold mt-0.5">
+              <i class="fa-solid fa-location-dot"></i>
+              <span>${store.neighborhood}</span>
+              <span class="text-slate-300">•</span>
+              <span class="text-slate-500 font-medium">${store.category || 'Comércio Local'}</span>
+            </div>
           </div>
 
-          <div>
-            <div class="text-base sm:text-lg font-black text-slate-900 mb-3">
-              ${priceFormatted}
-            </div>
+          ${hasCoords ? `
+            <button onclick="focusStoreOnMap(${store.latitude}, ${store.longitude}, '${store.name}')" class="shrink-0 p-2 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-400 hover:text-blue-600 border border-slate-200 transition-colors" title="Ver no Mapa">
+              <i class="fa-solid fa-map-location-dot text-base"></i>
+            </button>
+          ` : ''}
+        </div>
 
-            <div class="grid grid-cols-2 gap-2">
-              <a href="${waLink}" target="_blank" class="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-2.5 rounded-xl transition-colors">
+        <!-- RESUMO DA INTELIGÊNCIA LOCAL -->
+        <p class="text-xs text-slate-600 mt-2 leading-relaxed bg-slate-50/70 p-2.5 rounded-xl border border-slate-100">
+          ${store.ai_summary}
+        </p>
+
+        <!-- MARCAS VENDIDAS -->
+        ${brandsHtml}
+
+        <!-- AMOSTRAS DE ESTOQUE -->
+        ${samplesHtml}
+
+        <!-- ENDEREÇO E TELEFONE -->
+        <div class="mt-3.5 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div class="text-slate-500">
+            <div class="line-clamp-1"><i class="fa-solid fa-road mr-1 text-slate-400"></i> ${store.address}</div>
+            <div class="font-bold text-slate-700 mt-0.5"><i class="fa-solid fa-phone mr-1 text-slate-400"></i> ${store.phone_display}</div>
+          </div>
+
+          <div class="flex items-center gap-2 shrink-0">
+            ${store.website ? `
+              <a href="${store.website}" target="_blank" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors">
+                <i class="fa-solid fa-globe"></i>
+              </a>
+            ` : ''}
+            
+            ${store.whatsapp_url ? `
+              <a href="${store.whatsapp_url}" target="_blank" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition-all flex items-center gap-1.5 active:scale-95">
                 <i class="fa-brands fa-whatsapp text-sm"></i>
-                <span>Whats Loja</span>
+                <span>WhatsApp</span>
               </a>
-              <a href="${p.product_url}" target="_blank" class="flex items-center justify-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 px-2.5 rounded-xl transition-colors">
-                <span>Ver no Site</span>
-                <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
-              </a>
-            </div>
+            ` : ''}
           </div>
         </div>
       `;
-      grid.appendChild(card);
+
+      return card;
     }
 
-    document.getElementById('search-input').addEventListener('input', () => {
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(executeSearch, 300);
-    });
+    // Atalhos de termos
+    function setSearchTerm(term) {
+      document.getElementById('search-input').value = term;
+      executeSearch();
+    }
 
-    document.getElementById('search-input').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        clearTimeout(searchTimeout);
-        executeSearch();
+    // Reset de Filtros
+    function resetFilters() {
+      document.getElementById('search-input').value = '';
+      document.getElementById('filter-neighborhood').value = '';
+      executeSearch();
+    }
+
+    // Carregar mais lojas
+    function loadMore() {
+      currentOffset += limit;
+      executeSearch(true);
+    }
+
+    // Alternar modos de visualização (Split, Lista, Mapa)
+    function setViewMode(mode) {
+      currentViewMode = mode;
+      const colStores = document.getElementById('col-stores');
+      const colMap = document.getElementById('col-map');
+      
+      const btnSplit = document.getElementById('view-split');
+      const btnList = document.getElementById('view-list');
+      const btnMap = document.getElementById('view-map');
+
+      // Reset classes dos botões
+      [btnSplit, btnList, btnMap].forEach(btn => {
+        btn.className = "px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors";
+      });
+
+      if (mode === 'split') {
+        btnSplit.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors";
+        colStores.className = "lg:col-span-7 space-y-4 block";
+        colMap.className = "lg:col-span-5 sticky top-20 block";
+      } else if (mode === 'list') {
+        btnList.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors";
+        colStores.className = "lg:col-span-12 space-y-4 block";
+        colMap.className = "hidden";
+      } else if (mode === 'map') {
+        btnMap.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors";
+        colStores.className = "hidden";
+        colMap.className = "lg:col-span-12 relative block";
       }
-    });
 
+      if (leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 200);
+      }
+    }
+
+    // Modal Lojista
     function toggleModalLojista() {
       const modal = document.getElementById('modal-lojista');
       modal.classList.toggle('hidden');
     }
 
-    function switchDiscoverTab(tab) {
-      const tabStores = document.getElementById('tab-content-stores');
-      const tabSectors = document.getElementById('tab-content-sectors');
-      const btnStores = document.getElementById('tab-btn-stores');
-      const btnSectors = document.getElementById('tab-btn-sectors');
-
-      if (tab === 'stores') {
-        tabStores.classList.remove('hidden');
-        tabStores.classList.add('flex');
-        tabSectors.classList.add('hidden');
-        tabSectors.classList.remove('flex');
-        btnStores.className = "font-bold text-indigo-600 border-b-2 border-indigo-600 pb-1";
-        btnSectors.className = "font-medium text-slate-500 hover:text-slate-800 pb-1";
-        loadDiscoveredStores();
-      } else {
-        tabStores.classList.add('hidden');
-        tabStores.classList.remove('flex');
-        tabSectors.classList.remove('hidden');
-        tabSectors.classList.add('flex');
-        btnSectors.className = "font-bold text-indigo-600 border-b-2 border-indigo-600 pb-1";
-        btnStores.className = "font-medium text-slate-500 hover:text-slate-800 pb-1";
-        loadSearchTerms();
-      }
-    }
-
-    async function loadSearchTerms() {
-      const list = document.getElementById('sectors-list');
-      try {
-        const res = await fetch('/api/search-terms');
-        const terms = await res.json();
-        list.innerHTML = terms.map(t => `
-          <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between">
-            <div>
-              <span class="inline-block text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mb-1">${t.category}</span>
-              <p class="font-bold text-slate-800 truncate">${t.term}</p>
-            </div>
-            <button onclick="setDiscoverSearch('${t.term}')" class="mt-2 text-[10px] font-bold text-slate-600 hover:text-indigo-600 flex items-center gap-1 self-start">
-              <i class="fa-solid fa-play text-[8px]"></i> Varrer este Setor
-            </button>
-          </div>
-        `).join('');
-      } catch (e) {
-        list.innerHTML = '<p class="text-rose-500">Erro ao carregar setores.</p>';
-      }
-    }
-
-    function setDiscoverSearch(term) {
-      switchDiscoverTab('stores');
-      document.getElementById('discover-input').value = term;
-      runDiscovery();
-    }
-
-    async function addNewTerm() {
-      const term = document.getElementById('new-term-input').value.trim();
-      const cat = document.getElementById('new-term-cat').value.trim() || 'Comércio Geral';
-      if (!term) return;
-
-      try {
-        await fetch(`/api/search-terms?term=${encodeURIComponent(term)}&category=${encodeURIComponent(cat)}`, { method: 'POST' });
-        document.getElementById('new-term-input').value = '';
-        document.getElementById('new-term-cat').value = '';
-        loadSearchTerms();
-      } catch (e) {
-        alert('Erro ao adicionar termo: ' + e);
-      }
-    }
-
-    async function triggerProductsCapture() {
-      const btn = document.getElementById('btn-capture-all');
-      const originalHTML = btn.innerHTML;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Capturando...';
-      btn.disabled = true;
-
-      try {
-        const res = await fetch('/api/ingest-discovered', { method: 'POST' });
-        const data = await res.json();
-        alert(data.message);
-        setTimeout(() => {
-          loadStats();
-          executeSearch();
-        }, 5000);
-      } catch (e) {
-        alert('Erro ao iniciar captura: ' + e);
-      } finally {
-        btn.innerHTML = originalHTML;
-        btn.disabled = false;
-      }
-    }
-
-    async function loadDiscoveredStores() {
-      const list = document.getElementById('discovered-list');
-      try {
-        const res = await fetch('/api/discovered');
-        const stores = await res.json();
-        if (stores.length === 0) {
-          list.innerHTML = '<p class="text-slate-400 py-4 text-center">Nenhuma loja descoberta ainda. Digite um termo acima!</p>';
-          return;
-        }
-        list.innerHTML = stores.slice(0, 30).map(s => `
-          <div class="p-2.5 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-            <div class="truncate">
-              <strong class="text-slate-800 block truncate">${s.name}</strong>
-              <div class="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                <span><i class="fa-solid fa-location-dot text-rose-500"></i> ${s.neighborhood || 'Ribeirão'}</span>
-                ${s.phone ? `<span><i class="fa-solid fa-phone text-emerald-600"></i> ${s.phone}</span>` : ''}
-              </div>
-            </div>
-            <div class="shrink-0 flex items-center gap-1.5">
-              ${s.website ? `
-                <a href="${s.website}" target="_blank" class="px-2.5 py-1 bg-blue-600 text-white rounded-lg font-bold text-[10px] hover:bg-blue-700">
-                  Visitar Site <i class="fa-solid fa-arrow-up-right-from-square text-[9px]"></i>
-                </a>
-              ` : `
-                <span class="px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-[10px] font-medium">Apenas Loja Física</span>
-              `}
-            </div>
-          </div>
-        `).join('');
-      } catch (e) {
-        list.innerHTML = '<p class="text-rose-500">Erro ao carregar lojas descobertas.</p>';
-      }
-    }
-
-    async function runDiscovery() {
-      const q = document.getElementById('discover-input').value.trim();
-      if (!q) return;
-      const btn = document.getElementById('btn-discover');
-      const originalHTML = btn.innerHTML;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Varrendo...';
-      btn.disabled = true;
-
-      try {
-        await fetch(`/api/discover?query=${encodeURIComponent(q)}`, { method: 'POST' });
-        document.getElementById('discover-input').value = '';
-        await loadDiscoveredStores();
-      } catch (e) {
-        alert('Erro ao varrer mapa: ' + e);
-      } finally {
-        btn.innerHTML = originalHTML;
-        btn.disabled = false;
-      }
-    }
-
-    async function loadFilterOptions() {
-      // 1. Carrega todos os bairros dinamicamente
-      try {
-        const resBairros = await fetch('/api/neighborhoods');
-        const bairros = await resBairros.json();
-        const selectBairro = document.getElementById('filter-neighborhood');
-        selectBairro.innerHTML = '<option value="">Todos os Bairros de Ribeirão Preto</option>';
-        bairros.forEach(b => {
-          if (!b) return;
-          const opt = document.createElement('option');
-          opt.value = b;
-          opt.textContent = b;
-          selectBairro.appendChild(opt);
-        });
-      } catch (e) {
-        console.error('Erro ao carregar bairros:', e);
-      }
-
-      // 2. Carrega todas as lojas dinamicamente
-      try {
-        const resLojas = await fetch('/api/stores');
-        const lojas = await resLojas.json();
-        const selectLoja = document.getElementById('filter-store');
-        selectLoja.innerHTML = '<option value="">Todas as Lojas Locais</option>';
-        lojas.forEach(l => {
-          const opt = document.createElement('option');
-          opt.value = l.id;
-          opt.textContent = `${l.name} (${l.product_count} itens)`;
-          selectLoja.appendChild(opt);
-        });
-      } catch (e) {
-        console.error('Erro ao carregar lojas:', e);
-      }
-    }
-
+    // Iniciar tudo ao carregar
     window.addEventListener('DOMContentLoaded', () => {
+      initMap();
+      loadNeighborhoods();
+      loadStats();
       executeSearch();
-      setTimeout(() => {
-        loadStats();
-        loadAdBanner();
-        loadFilterOptions();
-      }, 50);
     });
   </script>
 </body>
