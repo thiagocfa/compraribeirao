@@ -46,6 +46,19 @@
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     .pb-safe-nav { padding-bottom: calc(74px + var(--sab)); }
 
+    /* Container do Mapa com altura explícita garantida (evita bug de 0px em flex-col) */
+    #tab-map {
+      height: calc(100vh - 194px);
+      height: calc(100dvh - 194px);
+      min-height: 460px;
+    }
+    #main-map {
+      width: 100%;
+      height: calc(100vh - 194px);
+      height: calc(100dvh - 194px);
+      min-height: 460px;
+    }
+
     /* Pinos do Mapa */
     .pin-wrap { background: transparent; border: 0; }
     .store-pin {
@@ -164,8 +177,8 @@
   <!-- ===================================================================== -->
   <!-- ABA 2: 🗺️ MAPA (CLICAR NA LOJA ABRE CARROSSEL RESUMIDO DE PRODUTOS)   -->
   <!-- ===================================================================== -->
-  <section id="tab-map" class="hidden flex-1 relative w-full" style="height: calc(100vh - 196px)">
-    <div id="main-map" class="w-full h-full z-10 bg-slate-100"></div>
+  <section id="tab-map" class="hidden relative w-full overflow-hidden">
+    <div id="main-map" class="z-10 bg-slate-100"></div>
 
     <!-- Contador e Botão Enquadrar sobre o mapa -->
     <div class="absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
@@ -425,7 +438,7 @@
     let activeStoreIdOnMap = null;
 
     const $ = (id) => document.getElementById(id);
-    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#8217;' }[c]));
 
     function showToast(msg) {
       const t = $('toast');
@@ -487,7 +500,8 @@
           ensureMapInitialized();
           mapInstance.invalidateSize();
           renderMapPins();
-        }, 60);
+          setTimeout(() => { if (mapInstance) mapInstance.invalidateSize(); }, 200);
+        }, 40);
       } else if (tab === 'add') {
         ensureAllStoresLoadedForSelect();
       }
@@ -694,7 +708,7 @@
     // BUSCA DE LOJAS FÍSICAS (alimenta a faixa de lojas, a aba Mapa e a aba Lojas)
     // -------------------------------------------------------------------------
     async function fetchStoresForSearch() {
-      let url = `/api/local-search?q=${encodeURIComponent(currentQuery)}&neighborhood=${encodeURIComponent(currentNeighborhood)}&limit=80`;
+      let url = `/api/local-search?q=${encodeURIComponent(currentQuery)}&neighborhood=${encodeURIComponent(currentNeighborhood)}&limit=400`;
       if (userLat !== null) url += `&user_lat=${userLat}&user_lng=${userLng}`;
 
       try {
@@ -735,7 +749,7 @@
         box.innerHTML = `<p class="text-xs text-slate-500 col-span-full py-8 text-center">Nenhuma loja encontrada.</p>`;
         return;
       }
-      box.innerHTML = storesList.map(s => `
+      box.innerHTML = storesList.slice(0, 120).map(s => `
         <div onclick="openStoreOnMap('${esc(s.id)}')" class="bg-white rounded-2xl border border-slate-200 p-3.5 flex items-center justify-between gap-3 cursor-pointer hover:border-blue-400 transition">
           <div class="min-w-0">
             <div class="flex items-center gap-1.5">
@@ -757,11 +771,26 @@
     // -------------------------------------------------------------------------
     function ensureMapInitialized() {
       if (mapInstance) return;
-      mapInstance = L.map('main-map', { zoomControl: false }).setView(CITY_CENTER, 12);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      mapInstance = L.map('main-map', { zoomControl: false }).setView(CITY_CENTER, 13);
+      L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
+
+      let fallbackActivated = false;
+      const primaryLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        subdomains: 'abcd',
         maxZoom: 19,
-        attribution: '&copy; OpenStreetMap'
+        attribution: '&copy; OpenStreetMap &copy; CARTO'
       }).addTo(mapInstance);
+
+      primaryLayer.on('tileerror', () => {
+        if (!fallbackActivated) {
+          fallbackActivated = true;
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap'
+          }).addTo(mapInstance);
+        }
+      });
+
       mapMarkersLayer = L.layerGroup().addTo(mapInstance);
       mapInstance.on('click', () => {
         $('map-store-drawer').classList.add('hidden');
@@ -777,26 +806,53 @@
       });
     }
 
+    function addMarkerForStore(s) {
+      const lat = parseFloat(s.latitude), lng = parseFloat(s.longitude);
+      if (isNaN(lat) || isNaN(lng)) return null;
+
+      const marker = L.marker([lat, lng], {
+        icon: createPinIcon(Number(s.has_catalog) === 1, s.id === activeStoreIdOnMap)
+      }).addTo(mapMarkersLayer);
+
+      marker.bindTooltip(`<b>${esc(s.name)}</b><br><span style="font-size:11px;color:#64748b">${esc(s.neighborhood || 'Ribeirão Preto')}</span>`, {
+        direction: 'top',
+        offset: [0, -28]
+      });
+
+      marker.on('click', (ev) => {
+        L.DomEvent.stopPropagation(ev);
+        selectStoreOnMap(s);
+      });
+      markersByStoreId[s.id] = { marker, store: s };
+      return [lat, lng];
+    }
+
     function renderMapPins() {
       if (!mapMarkersLayer) return;
       mapMarkersLayer.clearLayers();
       markersByStoreId = {};
       const validCoords = [];
 
+      // 1. Plota todas as lojas retornadas pela busca de lojas
       storesList.forEach(s => {
-        const lat = parseFloat(s.latitude), lng = parseFloat(s.longitude);
-        if (isNaN(lat) || isNaN(lng)) return;
-        validCoords.push([lat, lng]);
+        const pt = addMarkerForStore(s);
+        if (pt) validCoords.push(pt);
+      });
 
-        const marker = L.marker([lat, lng], {
-          icon: createPinIcon(Number(s.has_catalog) === 1, s.id === activeStoreIdOnMap)
-        }).addTo(mapMarkersLayer);
-
-        marker.on('click', (ev) => {
-          L.DomEvent.stopPropagation(ev);
-          selectStoreOnMap(s);
+      // 2. Garante também no mapa qualquer loja que tenha produtos encontrados na aba Produtos
+      productsList.forEach(p => {
+        if (!p.store_id || markersByStoreId[p.store_id]) return;
+        const pt = addMarkerForStore({
+          id: p.store_id,
+          name: p.store_name || 'Loja Física',
+          neighborhood: p.neighborhood || 'Ribeirão Preto',
+          latitude: p.latitude,
+          longitude: p.longitude,
+          whatsapp: p.whatsapp,
+          whatsapp_url: p.whatsapp_url,
+          has_catalog: 1
         });
-        markersByStoreId[s.id] = { marker, store: s };
+        if (pt) validCoords.push(pt);
       });
 
       $('map-stores-counter').textContent = `${validCoords.length} lojas no mapa`;
@@ -808,7 +864,9 @@
     function fitMapBounds() {
       activeStoreIdOnMap = null;
       $('map-store-drawer').classList.add('hidden');
-      const pts = storesList.map(s => [parseFloat(s.latitude), parseFloat(s.longitude)]).filter(c => !isNaN(c[0]) && !isNaN(c[1]));
+      const pts = Object.values(markersByStoreId)
+        .map(({ store: s }) => [parseFloat(s.latitude), parseFloat(s.longitude)])
+        .filter(c => !isNaN(c[0]) && !isNaN(c[1]));
       if (mapInstance && pts.length) {
         mapInstance.fitBounds(L.latLngBounds(pts), { padding: [35, 35], maxZoom: 15 });
       }
@@ -825,12 +883,27 @@
         if (entry) {
           selectStoreOnMap(entry.store);
         } else {
-          // Busca dados da loja caso não estivesse nos primeiros 80
+          // Busca dados completos da loja caso não estivesse no lote inicial
           try {
-            const res = await fetch(`/api/store/${encodeURIComponent(storeId)}/products?q=${encodeURIComponent(currentQuery)}`);
+            const res = await fetch(`/api/store/${encodeURIComponent(storeId)}/products?q=${encodeURIComponent(currentQuery)}&limit=16`);
             if (res.ok) {
               const d = await res.json();
-              showStoreDrawerOnMap({ id: d.store_id, name: d.store_name, neighborhood: d.neighborhood, sample_products: d.products }, d.products);
+              const stObj = {
+                id: d.store_id,
+                name: d.store_name,
+                neighborhood: d.neighborhood,
+                address: d.address,
+                subcategory: d.subcategory,
+                latitude: d.latitude,
+                longitude: d.longitude,
+                whatsapp: d.whatsapp,
+                whatsapp_url: d.whatsapp_url,
+                has_catalog: d.has_catalog,
+                product_count: d.product_count,
+                sample_products: d.products
+              };
+              addMarkerForStore(stObj);
+              selectStoreOnMap(stObj);
             }
           } catch (e) {}
         }

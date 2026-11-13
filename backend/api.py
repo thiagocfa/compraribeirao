@@ -896,10 +896,24 @@ def get_store_products(store_id: str, q: Optional[str] = None, limit: int = 24):
                 p.get("title")
             )
 
+        store_whatsapp_url = format_whatsapp_url(
+            store.get("whatsapp") or "",
+            store.get("name") or "Loja",
+            q
+        )
+
         return {
             "store_id": store_id,
             "store_name": store.get("name"),
             "neighborhood": store.get("neighborhood"),
+            "address": store.get("address") or "",
+            "subcategory": store.get("subcategory") or store.get("macro_category") or "Comércio Local",
+            "latitude": store.get("latitude"),
+            "longitude": store.get("longitude"),
+            "whatsapp": store.get("whatsapp") or "",
+            "whatsapp_url": store_whatsapp_url,
+            "has_catalog": store.get("has_catalog") or (1 if prods else 0),
+            "product_count": store.get("product_count") or len(prods),
             "products": prods
         }
 
