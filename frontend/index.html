@@ -1,1388 +1,1396 @@
 ﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+  <!--
+  ============================================================================
+  FRONTEND COMPRARIBEIRÃO (v3.0 — Mobile-First)
+  ============================================================================
+  Single Page App em HTML + Tailwind (CDN) + Leaflet (OpenStreetMap, sem chave).
+
+  Estrutura da página (de cima para baixo):
+    1. Header fixo (logo + atalho de busca compacto ao rolar)
+    2. Hero com a busca principal, "Perto de mim" e seletor de bairro
+    3. Setores rápidos (ícones coloridos com rolagem horizontal)
+    4. Lista de lojas (cards) + mapa fixo à direita no desktop
+    5. Barra de navegação inferior (celular) + botão flutuante "Mapa"
+    6. Camadas (bottom sheets): detalhe da loja, bairros, lojista e mapa em tela cheia
+    7. Painel de Controle local (/api/admin/*) — usado só no PC do desenvolvedor
+
+  Rotas da API consumidas:
+    GET  /api/local-search   GET /api/neighborhoods   GET /api/stats
+    POST /api/track-lead     GET /api/leads-report    /api/admin/*
+
+  Como dar manutenção:
+    - Setores rápidos: array CATEGORIES (no início do <script>)
+    - Card da loja: função storeCardHTML()
+    - Detalhe da loja: função renderStoreSheet()
+    - Pinos do mapa: funções pinIcon() / renderMarkers()
+  ============================================================================
+  -->
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CompraRibeirão - Encontre no Comércio Físico de Ribeirão Preto</title>
-  
-  <!-- Tailwind CSS & FontAwesome -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>CompraRibeirão — Ache no comércio físico de Ribeirão Preto</title>
+  <meta name="description" content="Descubra quais lojas físicas de Ribeirão Preto vendem ou consertam o que você precisa hoje. Distância, rota no GPS e WhatsApp direto do balcão.">
+  <meta name="theme-color" content="#1d4ed8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CompraRibeirão">
+  <meta property="og:title" content="CompraRibeirão — Comércio físico de Ribeirão Preto">
+  <meta property="og:description" content="Ache a loja certa perto de você e chame no WhatsApp.">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
+
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
-  <!-- Google Fonts: Plus Jakarta Sans -->
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'] } } }
+    };
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
-  <!-- Leaflet CSS & JS para Mapa Local Leve (100% Free OpenStreetMap) -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
   <style>
-    body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    .ad-gradient { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); }
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    :root { --sab: env(safe-area-inset-bottom, 0px); --sat: env(safe-area-inset-top, 0px); }
+    html { -webkit-tap-highlight-color: transparent; scroll-behavior: smooth; }
+    body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    /* Inputs com 16px evitam o zoom automático do iPhone ao focar */
+    input, select, textarea { font-size: 16px; }
+    input[type=search]::-webkit-search-cancel-button { display: none; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    .leaflet-popup-content-wrapper { border-radius: 14px; box-shadow: 0 12px 28px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1); }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .pb-nav { padding-bottom: calc(88px + var(--sab)); }
+    @media (min-width: 1024px) { .pb-nav { padding-bottom: 0; } }
+
+    /* Skeleton (carregamento) */
+    .skeleton { background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: 10px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    .fade-up { animation: fadeUp .35s ease both; }
+
+    /* Camadas / Bottom sheets */
+    .layer { visibility: hidden; pointer-events: none; transition: visibility 0s linear .35s; }
+    .layer.open { visibility: visible; pointer-events: auto; transition-delay: 0s; }
+    .layer .backdrop { opacity: 0; transition: opacity .3s ease; }
+    .layer.open .backdrop { opacity: 1; }
+    .layer .panel { transform: translateY(100%); transition: transform .38s cubic-bezier(.32,.72,0,1); }
+    .layer.open .panel { transform: translateY(0); }
+    @media (min-width: 768px) {
+      .layer .panel { transform: translateY(24px) scale(.98); opacity: 0; transition: transform .25s ease, opacity .25s ease; }
+      .layer.open .panel { transform: none; opacity: 1; }
+    }
+
+    /* Pinos numerados do mapa */
+    .pin-wrap { background: transparent; border: 0; }
+    .pin { width: 30px; height: 30px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: #2563eb;
+           border: 2.5px solid #fff; box-shadow: 0 6px 14px -4px rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; transition: transform .2s, background .2s; }
+    .pin span { transform: rotate(45deg); color: #fff; font-weight: 800; font-size: 11.5px; font-family: 'Plus Jakarta Sans', sans-serif; }
+    .pin.sponsored { background: #f59e0b; }
+    .pin.active { background: #059669; transform: rotate(-45deg) scale(1.3); }
+    .user-dot { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 0 rgba(37,99,235,.6); animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(37,99,235,.55); } 70% { box-shadow: 0 0 0 16px rgba(37,99,235,0); } 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0); } }
+    .leaflet-control-attribution { font-size: 9px; }
+    .leaflet-touch .leaflet-bar a { width: 36px; height: 36px; line-height: 36px; }
+
+    /* Header compacto ao rolar */
+    #app-header .header-search { display: none; }
+    #app-header.scrolled .header-search { display: flex; }
+    @media (max-width: 639px) { #app-header.scrolled .wordmark { display: none; } }
+
+    .hero-pattern { background-image: radial-gradient(rgba(255,255,255,.14) 1px, transparent 1px); background-size: 18px 18px; }
+    .store-card { transition: transform .15s ease, box-shadow .2s ease; }
+    .store-card:active { transform: scale(.985); }
+    .store-card.highlight { box-shadow: 0 0 0 2px #2563eb, 0 10px 30px -12px rgba(37,99,235,.45); }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
-  <!-- TOP BAR / NOTIFICAÇÃO LOCAL -->
-  <header class="bg-indigo-950 text-white text-xs py-1.5 px-4 border-b border-indigo-900">
-    <div class="max-w-7xl mx-auto flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span class="font-medium">CompraRibeirão • Buscador Inteligente do Comércio Físico de Ribeirão Preto - SP</span>
-      </div>
-      <div id="stats-badge" class="hidden sm:block text-slate-300 font-semibold">
-        710 lojas físicas • 103 bairros de RP • Contato Direto WhatsApp
+<body class="bg-slate-50 text-slate-800 min-h-screen pb-nav">
+
+  <!-- ===================================================================== -->
+  <!-- 1. HEADER                                                             -->
+  <!-- ===================================================================== -->
+  <header id="app-header" class="sticky top-0 z-40 bg-white/85 backdrop-blur-xl border-b border-slate-200/70" style="padding-top: var(--sat)">
+    <div class="max-w-7xl mx-auto px-4 h-14 flex items-center gap-3">
+      <a href="/" onclick="goHome(); return false;" class="flex items-center gap-2.5 shrink-0">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-600/30">
+          <i class="fa-solid fa-location-dot"></i>
+        </div>
+        <div class="wordmark leading-none">
+          <span class="text-[17px] font-extrabold tracking-tight text-slate-900">Compra<span class="text-blue-600">Ribeirão</span></span>
+          <span class="block text-[9.5px] uppercase font-bold tracking-[.14em] text-slate-400 mt-0.5">Comércio físico local</span>
+        </div>
+      </a>
+
+      <!-- Atalho de busca (aparece quando a busca principal sai da tela) -->
+      <button onclick="focusSearch()" class="header-search flex-1 min-w-0 items-center gap-2 h-10 px-3.5 rounded-full bg-slate-100 text-slate-500 text-sm font-medium">
+        <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs"></i>
+        <span id="header-search-text" class="truncate">Buscar em Ribeirão</span>
+      </button>
+
+      <div class="ml-auto flex items-center gap-2 shrink-0">
+        <button onclick="openMap()" class="hidden lg:flex items-center gap-2 text-sm font-bold text-slate-700 hover:bg-slate-100 px-3.5 h-10 rounded-xl transition">
+          <i class="fa-solid fa-map-location-dot text-blue-600"></i> Mapa
+        </button>
+        <button onclick="openLojista()" class="hidden sm:flex items-center gap-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-3.5 h-10 rounded-xl transition">
+          <i class="fa-solid fa-store"></i> Sou lojista
+        </button>
       </div>
     </div>
   </header>
 
-  <!-- NAVBAR COM A LOGO OFICIAL DO COMPRARIBEIRÃO -->
-  <nav class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
-    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-      
-      <!-- LOGO -->
-      <a href="/" onclick="resetFilters(); return false;" class="flex items-center gap-3 group">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-black text-xl shadow-md group-hover:scale-105 transition-transform">
-          <i class="fa-solid fa-location-dot"></i>
-        </div>
-        <div>
-          <span class="text-xl font-extrabold tracking-tight text-slate-900">Compra<span class="text-blue-600">Ribeirão</span></span>
-          <span class="block text-[10px] uppercase font-bold tracking-wider text-slate-400">Comércio Local Físico</span>
-        </div>
-      </a>
+  <!-- ===================================================================== -->
+  <!-- 2. HERO + BUSCA                                                       -->
+  <!-- ===================================================================== -->
+  <section class="relative overflow-hidden bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-700 text-white">
+    <div class="absolute inset-0 hero-pattern opacity-60 pointer-events-none"></div>
+    <div class="absolute -top-24 -right-20 w-72 h-72 bg-indigo-400/30 rounded-full blur-3xl pointer-events-none"></div>
+    <div class="absolute -bottom-24 -left-16 w-72 h-72 bg-sky-400/25 rounded-full blur-3xl pointer-events-none"></div>
 
-      <!-- AÇÕES / MONETIZAÇÃO -->
-      <div class="flex items-center gap-2 sm:gap-3">
-        <button onclick="openFullscreenMap()" class="hidden sm:flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl transition-all">
-          <i class="fa-solid fa-map-location-dot text-blue-600"></i>
-          <span>Mapa da Cidade</span>
-        </button>
-        <button onclick="toggleModalLojista()" class="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3.5 py-2 rounded-xl transition-all shadow-sm">
-          <i class="fa-solid fa-store"></i>
-          <span>Sou Lojista / Anunciar</span>
-        </button>
+    <div class="relative max-w-3xl mx-auto px-4 pt-6 pb-12 md:pt-14 md:pb-20">
+      <div class="inline-flex items-center gap-2 bg-white/15 backdrop-blur px-3 py-1 rounded-full text-[11px] font-bold tracking-wide ring-1 ring-white/20">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
+        Lojas físicas de Ribeirão Preto
       </div>
-    </div>
-  </nav>
+      <h1 class="mt-3 text-[28px] leading-[1.12] md:text-5xl font-extrabold tracking-tight">
+        Precisa de algo <span class="text-amber-300">hoje</span>?<br class="hidden sm:block">
+        Ache a loja certa perto de você.
+      </h1>
+      <p class="mt-2.5 text-[14px] md:text-base text-blue-100 max-w-xl">
+        Saiba quem vende ou conserta, veja a distância e chame no WhatsApp do balcão.
+      </p>
 
-  <!-- BANNER PUBLICITÁRIO PATROCINADO (LOJA EM DESTAQUE) -->
-  <div class="max-w-7xl mx-auto px-4 mt-4 w-full">
-    <div id="ad-banner" class="ad-gradient rounded-2xl p-4 sm:p-5 text-white shadow-md relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div class="absolute -right-10 -bottom-10 w-44 h-44 bg-white/10 rounded-full blur-xl pointer-events-none"></div>
-      <div class="relative z-10">
-        <div class="inline-flex items-center gap-1.5 bg-white/20 text-blue-100 text-[10px] font-bold px-2.5 py-0.5 rounded-full mb-1.5">
-          <i class="fa-solid fa-star text-amber-300"></i> Destaque do Comércio Ribeirão-pretano
-        </div>
-        <h2 id="ad-title" class="text-base sm:text-lg font-bold leading-snug">Babá Materiais de Construção & Reforma</h2>
-        <p id="ad-subtitle" class="text-xs text-blue-100 mt-0.5">Tintas, pisos, hidráulica e acabamentos com pronta entrega no Campos Elísios</p>
-      </div>
-      <a 
-        id="ad-link" 
-        href="https://wa.me/5516992231607?text=Ol%C3%A1%2C%20vi%20o%20Bab%C3%A1%20no%20CompraRibeir%C3%A3o%20e%20gostaria%20de%20um%20or%C3%A7amento." 
-        target="_blank" 
-        onclick="trackLead('baba-materiais', 'Babá Materiais de Construção', 'whatsapp_banner')"
-        class="relative z-10 shrink-0 bg-white text-blue-900 hover:bg-blue-50 font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow transition-transform active:scale-95 flex items-center gap-2"
-      >
-        <i class="fa-brands fa-whatsapp text-emerald-600 text-base"></i>
-        <span>Falar no WhatsApp</span>
-      </a>
-    </div>
-  </div>
-
-  <!-- SEÇÃO DE BUSCA LOCAL INTELIGENTE -->
-  <section class="max-w-7xl mx-auto px-4 pt-4 pb-2 w-full">
-    <div class="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
-      
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-3.5">
-        <div>
-          <h1 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">O que você precisa comprar ou consertar hoje em Ribeirão?</h1>
-          <p class="text-xs sm:text-sm text-slate-500 mt-0.5">Localize as lojas físicas certas perto de você, veja marcas atendidas e chame direto no WhatsApp.</p>
-        </div>
-
-        <!-- BOTÃO PERTO DE MIM (GEOLOCALIZAÇÃO 1 CLIQUE) -->
-        <button 
-          id="btn-near-me"
-          onclick="toggleNearMe()" 
-          class="self-start md:self-auto shrink-0 inline-flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 border border-slate-200 px-3.5 py-2 rounded-xl transition-all"
-          title="Ordenar lojas pela distância física até você"
-        >
-          <i class="fa-solid fa-location-crosshairs text-blue-600"></i>
-          <span id="near-me-label">Perto de Mim (GPS)</span>
-        </button>
-      </div>
-
-      <!-- CAMPOS DE BUSCA E BAIRRO -->
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <!-- Input de busca -->
-        <div class="md:col-span-8 relative">
-          <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-base"></i>
-          <input 
-            type="text" 
-            id="search-input" 
-            placeholder="Ex: bateria moura, porcelanato, parafuso sextavado, consertar celular, makita..."
-            class="w-full pl-11 pr-32 py-3.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm font-medium transition-all"
-            oninput="toggleClearBtn()"
-            onkeydown="if(event.key === 'Enter') executeSearch()"
-          />
-          <button 
-            id="btn-clear-search"
-            onclick="clearSearchInput()"
-            class="hidden absolute right-24 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 text-xs items-center justify-center transition-colors"
-            title="Limpar busca"
-          >
-            <i class="fa-solid fa-xmark"></i>
+      <!-- Formulário de busca -->
+      <form id="search-form" class="relative mt-5" onsubmit="event.preventDefault(); submitSearch();" autocomplete="off">
+        <div class="flex items-center bg-white rounded-2xl shadow-2xl shadow-blue-950/30 p-1.5 ring-1 ring-black/5">
+          <i class="fa-solid fa-magnifying-glass text-slate-400 pl-3 pr-1"></i>
+          <input id="search-input" type="search" enterkeyhint="search" inputmode="search"
+                 placeholder="Ex: bateria Moura, porcelanato..."
+                 class="flex-1 min-w-0 bg-transparent px-2 h-12 text-slate-800 placeholder-slate-400 font-medium focus:outline-none"
+                 oninput="onSearchInput()" onfocus="onSearchFocus()" onblur="onSearchBlur()">
+          <button type="button" id="btn-clear" onclick="clearSearch()" class="hidden w-8 h-8 mr-1 rounded-full bg-slate-100 text-slate-500 items-center justify-center" aria-label="Limpar">
+            <i class="fa-solid fa-xmark text-xs"></i>
           </button>
-          <button 
-            onclick="executeSearch()"
-            class="absolute right-1.5 top-1/2 -translate-y-1/2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-lg shadow transition-colors flex items-center gap-1.5"
-          >
-            <span>Buscar</span>
+          <button type="submit" class="h-12 px-4 md:px-6 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold flex items-center gap-2 shadow-md shadow-blue-600/40 transition" aria-label="Buscar">
+            <span class="hidden sm:inline">Buscar</span>
+            <i class="fa-solid fa-arrow-right"></i>
           </button>
         </div>
 
-        <!-- Seletor de Bairro -->
-        <div class="md:col-span-4 relative">
-          <i class="fa-solid fa-location-dot absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-600 text-sm pointer-events-none"></i>
-          <select 
-            id="filter-neighborhood" 
-            onchange="executeSearch()" 
-            class="w-full pl-9 pr-8 py-3.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-700 text-xs sm:text-sm font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 appearance-none cursor-pointer"
-          >
-            <option value="">Todos os Bairros de Ribeirão</option>
-          </select>
-          <i class="fa-solid fa-chevron-down absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+        <!-- Buscas recentes -->
+        <div id="recent-box" class="hidden absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 p-3 z-30 text-slate-700">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Buscas recentes</span>
+            <button type="button" onmousedown="event.preventDefault(); clearRecent()" class="text-[11px] font-bold text-blue-600">Limpar</button>
+          </div>
+          <div id="recent-list" class="flex flex-wrap gap-2"></div>
         </div>
-      </div>
+      </form>
 
-      <!-- CATEGORIAS POPULARES / ATALHOS -->
-      <div class="flex items-center gap-2 mt-3.5 pt-3 border-t border-slate-100 overflow-x-auto pb-1 text-xs no-scrollbar">
-        <span class="text-slate-400 font-bold shrink-0 text-[11px] uppercase tracking-wider">Setores:</span>
-        <button onclick="setSearchTerm('bateria automotiva')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-car-battery text-blue-600"></i> Baterias
+      <!-- Filtros de localização -->
+      <div class="mt-3 flex items-center gap-2 overflow-x-auto no-scrollbar">
+        <button id="chip-near" onclick="toggleNearMe()" class="shrink-0 h-9 px-3.5 rounded-full bg-white/15 hover:bg-white/25 ring-1 ring-white/25 text-[13px] font-bold flex items-center gap-2 transition">
+          <i class="fa-solid fa-location-crosshairs"></i><span id="chip-near-label">Perto de mim</span>
         </button>
-        <button onclick="setSearchTerm('tintas pisos porcelanato construcao')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-trowel-bricks text-blue-600"></i> Tintas & Construção
-        </button>
-        <button onclick="setSearchTerm('ferramentas parafusos makita furadeira')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-wrench text-blue-600"></i> Ferramentas & Parafusos
-        </button>
-        <button onclick="setSearchTerm('auto pecas pneus oleo')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-car text-blue-600"></i> Autopeças & Óleo
-        </button>
-        <button onclick="setSearchTerm('hidraulica tubos eletrica iluminacao')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-bolt text-blue-600"></i> Elétrica & Hidráulica
-        </button>
-        <button onclick="setSearchTerm('piscina cloro bombas')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-water-ladder text-blue-600"></i> Piscinas
-        </button>
-        <button onclick="setSearchTerm('cameras seguranca cftv alarmes')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-video text-blue-600"></i> Segurança & CFTV
-        </button>
-        <button onclick="setSearchTerm('celular iphone informatica computador')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-mobile-screen text-blue-600"></i> Celulares & Informática
-        </button>
-        <button onclick="setSearchTerm('colchoes camas moveis')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-bed text-blue-600"></i> Móveis & Colchões
-        </button>
-        <button onclick="setSearchTerm('otica oculos lentes')" class="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 border border-transparent text-slate-700 rounded-lg font-medium transition-all flex items-center gap-1.5">
-          <i class="fa-solid fa-glasses text-blue-600"></i> Óticas
+        <button id="chip-neigh" onclick="openNeighborhoods()" class="shrink-0 h-9 px-3.5 rounded-full bg-white/15 hover:bg-white/25 ring-1 ring-white/25 text-[13px] font-bold flex items-center gap-2 transition">
+          <i class="fa-solid fa-house-chimney"></i><span id="chip-neigh-label">Todos os bairros</span><i class="fa-solid fa-chevron-down text-[10px] opacity-80"></i>
         </button>
       </div>
 
+      <div class="mt-4 flex items-center gap-3 text-[12px] text-blue-100 font-semibold">
+        <span><i class="fa-solid fa-store mr-1 opacity-80"></i><b id="stat-stores" class="text-white">710</b> lojas</span>
+        <span class="opacity-40">•</span>
+        <span><i class="fa-solid fa-map-pin mr-1 opacity-80"></i><b id="stat-neigh" class="text-white">78</b> bairros</span>
+        <span class="opacity-40">•</span>
+        <span><i class="fa-brands fa-whatsapp mr-1 opacity-80"></i>Contato direto</span>
+      </div>
     </div>
   </section>
 
-  <!-- CORPO PRINCIPAL COM LISTA DE LOJAS E MAPA INTEGRADO -->
-  <main class="max-w-7xl mx-auto px-4 py-3 w-full flex-1">
-    
-    <!-- BARRA DE STATUS / ALTERNAR VISUALIZAÇÃO -->
-    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
-      <div class="flex items-center gap-2 flex-wrap">
-        <h2 id="results-title" class="text-base font-bold text-slate-800">Lojas Físicas Recomendadas:</h2>
-        <span id="results-count" class="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold border border-blue-200">
-          Carregando...
+  <!-- ===================================================================== -->
+  <!-- 3. CONTEÚDO (sobrepõe o hero com cantos arredondados)                 -->
+  <!-- ===================================================================== -->
+  <div class="relative -mt-6 bg-slate-50 rounded-t-[28px] md:rounded-t-[36px]">
+
+    <!-- Setores rápidos -->
+    <section class="max-w-7xl mx-auto pt-5">
+      <div class="px-4 flex items-center justify-between mb-3">
+        <h2 class="text-[15px] font-extrabold text-slate-900">Explore por setor</h2>
+        <span class="text-[11px] font-semibold text-slate-400 sm:hidden">deslize <i class="fa-solid fa-arrow-right-long ml-0.5"></i></span>
+      </div>
+      <div id="categories" class="flex gap-2 overflow-x-auto no-scrollbar px-4 pb-1 snap-x lg:flex-wrap lg:justify-start"></div>
+    </section>
+
+    <!-- Destaque patrocinado -->
+    <section class="max-w-7xl mx-auto px-4 mt-5">
+      <a href="https://wa.me/5516992231607?text=Ol%C3%A1%2C%20vi%20o%20Bab%C3%A1%20no%20CompraRibeir%C3%A3o%20e%20gostaria%20de%20um%20or%C3%A7amento."
+         target="_blank" rel="noopener" onclick="trackLead('baba-materiais','Babá Materiais de Construção','whatsapp_banner')"
+         class="relative overflow-hidden flex items-center gap-3.5 p-4 rounded-3xl bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-lg active:scale-[.99] transition">
+        <div class="absolute -right-8 -top-10 w-36 h-36 bg-amber-400/20 rounded-full blur-2xl"></div>
+        <div class="w-12 h-12 rounded-2xl bg-amber-400 text-slate-900 flex items-center justify-center text-xl shrink-0 shadow">
+          <i class="fa-solid fa-trowel-bricks"></i>
+        </div>
+        <div class="min-w-0 flex-1 relative">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-amber-300"><i class="fa-solid fa-star mr-1"></i>Destaque local</span>
+          <p class="font-extrabold text-[15px] leading-tight truncate">Babá Materiais de Construção</p>
+          <p class="text-[12px] text-slate-300 truncate">Tintas, pisos e hidráulica • Campos Elísios</p>
+        </div>
+        <span class="relative w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/40">
+          <i class="fa-brands fa-whatsapp text-lg"></i>
         </span>
+      </a>
+    </section>
 
-        <!-- BOTÃO DESTAQUE: EXPANDIR MAPA COM TODOS OS LOCAIS -->
-        <button 
-          onclick="openFullscreenMap()" 
-          class="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-full transition-all shadow-sm active:scale-95"
-        >
-          <i class="fa-solid fa-map-location-dot text-emerald-600"></i>
-          <span>Expandir Mapa com Todos os Locais</span>
-        </button>
-      </div>
+    <!-- Resultados -->
+    <main class="max-w-7xl mx-auto px-4 mt-6 pb-6">
+      <div id="results-anchor" class="scroll-mt-20"></div>
+      <div class="lg:grid lg:grid-cols-12 lg:gap-6 items-start">
 
-      <!-- BOTÕES DE CONTROLE DA VISUALIZAÇÃO NA PÁGINA -->
-      <div class="flex items-center bg-white border border-slate-200 rounded-xl p-1 shadow-sm text-xs font-semibold text-slate-600">
-        <button id="view-split" onclick="setViewMode('split')" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors">
-          <i class="fa-solid fa-table-columns"></i>
-          <span class="hidden sm:inline">Lista & Mapa</span>
-        </button>
-        <button id="view-list" onclick="setViewMode('list')" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors">
-          <i class="fa-solid fa-list"></i>
-          <span class="hidden sm:inline">Apenas Lojas</span>
-        </button>
-        <button id="view-map" onclick="setViewMode('map')" class="px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors">
-          <i class="fa-solid fa-map"></i>
-          <span class="hidden sm:inline">Apenas Mapa</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- CONTAINER DE 2 COLUNAS: LISTA DE LOJAS + MAPA LEAFLET -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      
-      <!-- COLUNA DA ESQUERDA: LISTA DE LOJAS FÍSICAS (60% NO SPLIT) -->
-      <div id="col-stores" class="lg:col-span-7 space-y-4">
-        <div id="stores-container" class="space-y-4">
-          <!-- Injetado dinamicamente via JS -->
-        </div>
-
-        <!-- BOTÃO CARREGAR MAIS LOJAS -->
-        <div id="load-more-container" class="text-center pt-4 pb-8 hidden">
-          <button onclick="loadMore()" class="px-6 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-bold text-xs rounded-xl shadow-sm transition-all hover:shadow">
-            <i class="fa-solid fa-plus mr-1"></i> Carregar Mais Estabelecimentos
-          </button>
-        </div>
-
-        <!-- ESTADO VAZIO -->
-        <div id="empty-state" class="hidden text-center py-16 bg-white rounded-2xl border border-slate-200 p-6">
-          <div class="w-14 h-14 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">
-            <i class="fa-solid fa-store-slash"></i>
-          </div>
-          <h3 class="text-base font-bold text-slate-800">Nenhum comércio físico encontrado para essa combinação</h3>
-          <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">Tente buscar pelo nome do produto ou setor (ex: "bateria", "tinta", "ferramentas") ou veja em todos os bairros.</p>
-          <button onclick="resetFilters()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors">
-            Ver Todas as Lojas de Ribeirão
-          </button>
-        </div>
-      </div>
-
-      <!-- COLUNA DA DIREITA: MAPA INTERATIVO LEAFLET (40% NO SPLIT, FIXO NA TELA) -->
-      <div id="col-map" class="lg:col-span-5 sticky top-20">
-        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 overflow-hidden">
-          <div class="flex items-center justify-between mb-2 px-1">
-            <span class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-              <i class="fa-solid fa-map-pin text-blue-600"></i> Mapa Comercial de Ribeirão
-            </span>
-            <div class="flex items-center gap-2">
-              <span id="map-counter" class="text-[11px] text-slate-400 font-medium">0 pontos</span>
-              <!-- BOTÃO ENQUADRAR -->
-              <button onclick="fitAllMapBounds()" class="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs transition-colors" title="Enquadrar todos os locais">
-                <i class="fa-solid fa-crosshairs"></i>
-              </button>
-              <!-- BOTÃO EXPANDIR TELA CHEIA -->
-              <button onclick="openFullscreenMap()" class="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs transition-colors font-bold flex items-center gap-1" title="Expandir Mapa em Tela Cheia">
-                <i class="fa-solid fa-expand"></i>
-                <span>Expandir</span>
-              </button>
+        <!-- Lista -->
+        <div class="lg:col-span-7">
+          <div class="flex items-end justify-between gap-3 mb-2">
+            <div class="min-w-0">
+              <p id="results-kicker" class="text-[11px] font-bold uppercase tracking-wider text-blue-600">Em toda Ribeirão Preto</p>
+              <h2 id="results-title" class="text-lg md:text-xl font-extrabold text-slate-900 truncate">Lojas recomendadas</h2>
             </div>
+            <span id="results-count" class="shrink-0 text-xs font-bold text-slate-600 bg-white ring-1 ring-slate-200 px-2.5 py-1 rounded-full">…</span>
           </div>
+          <div id="active-filters" class="flex gap-2 overflow-x-auto no-scrollbar mb-3"></div>
 
-          <!-- MAP DIV (100% FREE OSM) -->
-          <div id="leaflet-map" class="w-full h-[520px] rounded-xl bg-slate-100 border border-slate-200 z-10"></div>
-          
-          <div class="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
-            <span>Clique nos pinos azuis para WhatsApp e Rota GPS.</span>
-            <button onclick="openFullscreenMap()" class="text-blue-600 font-bold hover:underline">
-              Tela cheia &rarr;
-            </button>
+          <div id="stores-list" class="space-y-3"></div>
+          <div id="list-sentinel" class="h-6"></div>
+          <div id="list-end" class="hidden text-center text-xs text-slate-400 font-semibold py-4">Você viu todas as lojas desta busca ✨</div>
+        </div>
+
+        <!-- Mapa fixo (desktop) -->
+        <aside class="hidden lg:block lg:col-span-5 sticky top-20">
+          <div class="bg-white rounded-3xl ring-1 ring-slate-200 shadow-sm p-2.5">
+            <div class="flex items-center justify-between px-2 pb-2">
+              <span class="text-sm font-bold text-slate-800"><i class="fa-solid fa-map-location-dot text-blue-600 mr-1.5"></i>Mapa das lojas</span>
+              <div class="flex gap-1.5">
+                <button onclick="fitInline()" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs" title="Enquadrar"><i class="fa-solid fa-expand"></i></button>
+                <button onclick="openMap()" class="h-8 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold">Tela cheia</button>
+              </div>
+            </div>
+            <div id="inline-map" class="w-full h-[calc(100vh-10rem)] min-h-[420px] rounded-2xl bg-slate-100 z-0"></div>
           </div>
+        </aside>
+      </div>
+    </main>
+
+    <!-- Rodapé -->
+    <footer class="max-w-7xl mx-auto px-4 pb-8 pt-2">
+      <div class="rounded-3xl bg-white ring-1 ring-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p class="font-extrabold text-slate-900">Compra<span class="text-blue-600">Ribeirão</span></p>
+          <p class="text-xs text-slate-500 mt-0.5">Inteligência para fortalecer o comércio físico de Ribeirão Preto - SP.</p>
+          <p class="text-[11px] text-slate-400 mt-1">Confirme preço e estoque direto com a loja pelo WhatsApp.</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="openLojista()" class="h-10 px-4 rounded-xl bg-blue-600 text-white text-sm font-bold">Anunciar minha loja</button>
+          <button onclick="toggleModalAdmin()" class="h-10 w-10 rounded-xl bg-slate-100 text-slate-500" title="Painel de Controle"><i class="fa-solid fa-sliders"></i></button>
         </div>
       </div>
-
-    </div>
-
-  </main>
-
-  <!-- MODAL DE MAPA EXPANDIDO EM TELA CHEIA (DESKTOP + MOBILE) -->
-  <div id="modal-map-fullscreen" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden flex flex-col p-2 sm:p-4">
-    <div class="bg-white rounded-2xl w-full h-full shadow-2xl flex flex-col overflow-hidden relative border border-slate-200">
-      
-      <!-- TOP BAR DO MAPA EXPANDIDO -->
-      <div class="p-3 sm:p-4 border-b border-slate-200 flex items-center justify-between gap-3 bg-white z-20 shrink-0">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-base shadow-sm">
-            <i class="fa-solid fa-map-location-dot"></i>
-          </div>
-          <div>
-            <h3 class="text-sm sm:text-base font-black text-slate-900 leading-tight">Mapa de Lojas Físicas — Ribeirão Preto</h3>
-            <span id="fullscreen-map-counter" class="text-xs text-blue-600 font-bold">0 estabelecimentos mapeados</span>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <button onclick="fitAllFullscreenBounds()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5">
-            <i class="fa-solid fa-crosshairs text-blue-600"></i>
-            <span class="hidden sm:inline">Enquadrar Todos</span>
-          </button>
-          <button onclick="closeFullscreenMap()" class="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow transition-colors flex items-center gap-1.5">
-            <i class="fa-solid fa-xmark"></i>
-            <span>Fechar Mapa</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- CORPO COM MAPA FULL + GAVETA LATERAL (DESKTOP) E CARROSSEL INFERIOR (MOBILE) -->
-      <div class="flex-1 relative flex overflow-hidden">
-        
-        <!-- DIV DO MAPA FULL -->
-        <div id="fullscreen-leaflet-map" class="w-full h-full bg-slate-100 z-10"></div>
-
-        <!-- GAVETA LATERAL DE LOJAS (DESKTOP) -->
-        <div class="absolute right-3 top-3 bottom-3 w-80 max-w-[85vw] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 z-20 hidden sm:flex flex-col">
-          <div class="p-3 border-b border-slate-100 flex items-center justify-between">
-            <span class="text-xs font-bold text-slate-800">Estabelecimentos no Mapa</span>
-            <span id="drawer-counter" class="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-bold"></span>
-          </div>
-          <div id="drawer-stores-list" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar text-xs">
-            <!-- Injetado dinamicamente -->
-          </div>
-        </div>
-
-        <!-- CARROSSEL DESLIZÁVEL INFERIOR DE LOJAS (MOBILE) -->
-        <div id="mobile-map-drawer" class="sm:hidden absolute bottom-3 left-2 right-2 z-20 flex overflow-x-auto gap-2.5 pb-1 no-scrollbar">
-          <!-- Injetado dinamicamente para celulares -->
-        </div>
-
-      </div>
-
-    </div>
+    </footer>
   </div>
 
-  <!-- MODAL: ANUNCIE SUA LOJA / PAINEL DE LEADS -->
-  <div id="modal-lojista" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
-      <button onclick="toggleModalLojista()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-lg">
-        <i class="fa-solid fa-xmark"></i>
+  <!-- ===================================================================== -->
+  <!-- 4. BOTÃO FLUTUANTE "MAPA" + NAVEGAÇÃO INFERIOR (CELULAR)              -->
+  <!-- ===================================================================== -->
+  <button id="fab-map" onclick="openMap()"
+          class="lg:hidden fixed left-1/2 -translate-x-1/2 z-30 h-12 px-5 rounded-full bg-slate-900 text-white font-bold text-sm shadow-2xl shadow-slate-900/40 flex items-center gap-2 transition-all duration-300 opacity-0 translate-y-4 pointer-events-none"
+          style="bottom: calc(80px + var(--sab))">
+    <i class="fa-solid fa-map"></i><span id="fab-map-label">Ver no mapa</span>
+  </button>
+
+  <nav class="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/90 backdrop-blur-xl border-t border-slate-200/80" style="padding-bottom: var(--sab)">
+    <div class="grid grid-cols-4 h-16 text-[11px] font-bold">
+      <button id="nav-home" onclick="goHome()" class="nav-btn flex flex-col items-center justify-center gap-1 text-blue-600">
+        <i class="fa-solid fa-house text-lg"></i>Início
       </button>
-      <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl mb-3">
-        <i class="fa-solid fa-bullhorn"></i>
-      </div>
-      <h3 class="text-lg font-bold text-slate-900">Destaque sua Loja Física em Ribeirão</h3>
-      <p class="text-xs text-slate-500 mt-1">Conecte seu balcão aos consumidores que estão procurando exatamente o que você vende ou conserta hoje na cidade.</p>
-      
-      <div class="mt-4 space-y-2.5">
-        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
-          <span class="font-bold text-slate-800 block"><i class="fa-solid fa-ranking-star text-amber-500 mr-1"></i> Topo das Buscas no seu Bairro</span>
-          <span class="text-slate-500">Sua loja aparece em 1º lugar com selo dourado quando buscarem seu setor.</span>
-        </div>
-        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
-          <span class="font-bold text-slate-800 block"><i class="fa-brands fa-whatsapp text-emerald-600 mr-1"></i> Leads Diretos no seu WhatsApp</span>
-          <span class="text-slate-500">Zero comissão sobre vendas. O cliente chama direto a sua equipe comercial.</span>
-        </div>
-        <div id="leads-stats-box" class="bg-blue-50/70 p-3 rounded-xl border border-blue-100 text-xs hidden">
-          <span class="font-bold text-blue-900 block"><i class="fa-solid fa-chart-line mr-1"></i> Cliques Registrados na Sessão</span>
-          <span id="leads-stats-text" class="text-blue-700 text-[11px]">Carregando telemetria...</span>
-        </div>
-      </div>
+      <button id="nav-search" onclick="focusSearch()" class="nav-btn flex flex-col items-center justify-center gap-1 text-slate-400">
+        <i class="fa-solid fa-magnifying-glass text-lg"></i>Buscar
+      </button>
+      <button id="nav-map" onclick="openMap()" class="nav-btn flex flex-col items-center justify-center gap-1 text-slate-400">
+        <i class="fa-solid fa-map-location-dot text-lg"></i>Mapa
+      </button>
+      <button id="nav-lojista" onclick="openLojista()" class="nav-btn flex flex-col items-center justify-center gap-1 text-slate-400">
+        <i class="fa-solid fa-store text-lg"></i>Lojista
+      </button>
+    </div>
+  </nav>
 
-      <div class="mt-6 flex flex-col gap-2">
-        <a href="https://wa.me/5516992231607?text=Ol%C3%A1%2C%20tenho%20uma%20loja%20em%20Ribeir%C3%A3o%20Preto%20e%20gostaria%20de%20anunciar%20no%20CompraRibeir%C3%A3o." target="_blank" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow text-center flex items-center justify-center gap-2 transition-all">
-          <i class="fa-brands fa-whatsapp text-base"></i>
-          Falar com a Equipe CompraRibeirão
+  <!-- ===================================================================== -->
+  <!-- 5. CAMADA: MAPA EM TELA CHEIA (com carrossel de lojas)                -->
+  <!-- ===================================================================== -->
+  <div id="map-layer" data-kind="full" class="hidden fixed inset-0 z-50 bg-slate-100">
+    <div id="overlay-map" class="absolute inset-0 z-0"></div>
+
+    <div class="absolute inset-x-0 top-0 z-10 px-3 flex items-center gap-2 pointer-events-none" style="padding-top: calc(var(--sat) + 12px)">
+      <button onclick="closeTopLayer()" class="pointer-events-auto w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center text-slate-700" aria-label="Voltar">
+        <i class="fa-solid fa-arrow-left"></i>
+      </button>
+      <div class="pointer-events-auto flex-1 min-w-0 h-11 px-4 rounded-full bg-white shadow-lg flex items-center gap-2" onclick="closeTopLayer(); setTimeout(focusSearch, 250)">
+        <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs"></i>
+        <span id="map-title" class="truncate text-sm font-bold text-slate-700">Lojas no mapa</span>
+      </div>
+      <button onclick="toggleNearMe()" id="map-near-btn" class="pointer-events-auto w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center text-blue-600" aria-label="Perto de mim">
+        <i class="fa-solid fa-location-crosshairs"></i>
+      </button>
+      <button onclick="fitOverlay()" class="pointer-events-auto w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center text-slate-700" aria-label="Enquadrar todos">
+        <i class="fa-solid fa-expand"></i>
+      </button>
+    </div>
+
+    <div id="map-carousel" class="absolute inset-x-0 bottom-0 z-10 flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory px-[7vw] md:px-6"
+         style="padding-bottom: calc(var(--sab) + 16px)"></div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- 6. CAMADA: DETALHE DA LOJA (bottom sheet)                             -->
+  <!-- ===================================================================== -->
+  <div id="store-layer" class="layer fixed inset-0 z-[60] flex items-end md:items-center justify-center">
+    <div class="backdrop absolute inset-0 bg-slate-950/50 backdrop-blur-[2px]" onclick="closeTopLayer()"></div>
+    <div class="panel relative w-full md:max-w-lg bg-white rounded-t-[28px] md:rounded-3xl max-h-[92vh] overflow-y-auto overscroll-contain shadow-2xl no-scrollbar" style="padding-bottom: var(--sab)">
+      <div id="store-sheet"></div>
+    </div>
+  </div>
+
+  <!-- CAMADA: ESCOLHA DE BAIRRO -->
+  <div id="neigh-layer" class="layer fixed inset-0 z-[60] flex items-end md:items-center justify-center">
+    <div class="backdrop absolute inset-0 bg-slate-950/50 backdrop-blur-[2px]" onclick="closeTopLayer()"></div>
+    <div class="panel relative w-full md:max-w-md bg-white rounded-t-[28px] md:rounded-3xl h-[82vh] md:h-[70vh] flex flex-col shadow-2xl" style="padding-bottom: var(--sab)">
+      <div class="pt-2.5 px-5 shrink-0">
+        <div class="mx-auto w-10 h-1.5 rounded-full bg-slate-200 md:hidden"></div>
+        <div class="flex items-center justify-between mt-3">
+          <h3 class="text-lg font-extrabold text-slate-900">Onde você está?</h3>
+          <button onclick="closeTopLayer()" class="w-9 h-9 rounded-full bg-slate-100 text-slate-500"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="relative mt-3">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+          <input id="neigh-search" type="search" placeholder="Buscar bairro..." oninput="renderNeighborhoodList(this.value)"
+                 class="w-full h-11 pl-10 pr-3 rounded-xl bg-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-blue-600">
+        </div>
+        <button onclick="closeTopLayer(); setTimeout(()=>enableNearMe(), 300)" class="mt-3 w-full h-12 px-4 rounded-xl bg-blue-50 text-blue-700 font-bold text-sm flex items-center gap-3">
+          <i class="fa-solid fa-location-crosshairs"></i> Usar minha localização atual
+        </button>
+      </div>
+      <div id="neigh-list" class="flex-1 overflow-y-auto overscroll-contain px-3 py-3 custom-scrollbar"></div>
+    </div>
+  </div>
+
+  <!-- CAMADA: SOU LOJISTA -->
+  <div id="lojista-layer" class="layer fixed inset-0 z-[60] flex items-end md:items-center justify-center">
+    <div class="backdrop absolute inset-0 bg-slate-950/50 backdrop-blur-[2px]" onclick="closeTopLayer()"></div>
+    <div class="panel relative w-full md:max-w-md bg-white rounded-t-[28px] md:rounded-3xl max-h-[92vh] overflow-y-auto shadow-2xl" style="padding-bottom: calc(var(--sab) + 8px)">
+      <div class="pt-2.5 px-5 pb-5">
+        <div class="mx-auto w-10 h-1.5 rounded-full bg-slate-200 md:hidden"></div>
+        <div class="flex justify-end mt-2"><button onclick="closeTopLayer()" class="w-9 h-9 rounded-full bg-slate-100 text-slate-500"><i class="fa-solid fa-xmark"></i></button></div>
+        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-blue-600/30 -mt-4">
+          <i class="fa-solid fa-bullhorn"></i>
+        </div>
+        <h3 class="text-xl font-extrabold text-slate-900 mt-3">Coloque sua loja na frente de quem já quer comprar</h3>
+        <p class="text-sm text-slate-500 mt-1">Moradores de Ribeirão buscam aqui o que precisam hoje. Você recebe o cliente direto no WhatsApp.</p>
+        <div class="mt-4 space-y-2.5">
+          <div class="flex gap-3 p-3.5 rounded-2xl bg-slate-50">
+            <i class="fa-solid fa-ranking-star text-amber-500 text-lg mt-0.5"></i>
+            <div><p class="text-sm font-bold text-slate-800">Topo das buscas do seu bairro</p><p class="text-xs text-slate-500">Selo de destaque quando buscarem seu setor.</p></div>
+          </div>
+          <div class="flex gap-3 p-3.5 rounded-2xl bg-slate-50">
+            <i class="fa-brands fa-whatsapp text-emerald-600 text-lg mt-0.5"></i>
+            <div><p class="text-sm font-bold text-slate-800">Contato direto, zero comissão</p><p class="text-xs text-slate-500">O cliente fala com seu balcão, sem intermediários.</p></div>
+          </div>
+          <div class="flex gap-3 p-3.5 rounded-2xl bg-slate-50">
+            <i class="fa-solid fa-chart-line text-blue-600 text-lg mt-0.5"></i>
+            <div><p class="text-sm font-bold text-slate-800">Relatório de cliques</p><p class="text-xs text-slate-500">Veja quantos clientes chamaram ou pediram rota.</p></div>
+          </div>
+          <div id="leads-stats-box" class="hidden p-3.5 rounded-2xl bg-blue-50 text-blue-800 text-xs font-semibold">
+            <i class="fa-solid fa-bolt mr-1"></i><span id="leads-stats-text"></span>
+          </div>
+        </div>
+        <a href="https://wa.me/5516992231607?text=Ol%C3%A1%2C%20tenho%20uma%20loja%20em%20Ribeir%C3%A3o%20Preto%20e%20gostaria%20de%20anunciar%20no%20CompraRibeir%C3%A3o."
+           target="_blank" rel="noopener" class="mt-5 w-full h-12 rounded-2xl bg-emerald-500 active:bg-emerald-600 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30">
+          <i class="fa-brands fa-whatsapp text-lg"></i> Falar com a equipe
         </a>
-        <button onclick="toggleModalLojista()" class="w-full py-2.5 text-xs text-slate-500 font-bold hover:bg-slate-100 rounded-xl transition-colors">
-          Fechar
-        </button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL: PAINEL DE CONTROLE E MANUTENÇÃO LOCAL (CAPTURA, IA, COMPILAÇÃO E NUVEM) -->
-  <div id="modal-admin" class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4">
-    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
-      
-      <!-- Cabeçalho do Painel -->
-      <div class="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-lg shadow">
-            <i class="fa-solid fa-sliders"></i>
-          </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <h3 class="text-base sm:text-lg font-black">Painel de Controle & Manutenção</h3>
-              <span id="admin-env-badge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Verificando...</span>
+  <!-- TOAST -->
+  <div id="toast" class="fixed left-1/2 -translate-x-1/2 z-[90] max-w-[90vw] px-4 py-3 rounded-2xl bg-slate-900 text-white text-sm font-semibold shadow-2xl opacity-0 translate-y-3 pointer-events-none transition-all duration-300"
+       style="bottom: calc(150px + var(--sab))"></div>
+
+  <!-- ===================================================================== -->
+  <!-- 7. PAINEL DE CONTROLE LOCAL (captura, IA, compilação e nuvem)         -->
+  <!-- ===================================================================== -->
+  <div id="modal-admin" class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm z-[70] hidden flex items-center justify-center p-2 sm:p-4">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[94vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="p-4 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shrink-0"><i class="fa-solid fa-sliders"></i></div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="text-base font-extrabold">Painel de Controle</h3>
+              <span id="admin-env-badge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">Verificando...</span>
             </div>
-            <p class="text-xs text-slate-400">Gerencie a Captura (Maps + Sites), IA Local (Qwen 2.5), Banco Leve e Publicação na Nuvem</p>
+            <p class="text-[11px] text-slate-400 truncate">Captura • IA local (Qwen 2.5) • Banco leve • Nuvem</p>
           </div>
         </div>
-        <div class="flex items-center gap-2">
-          <button onclick="loadAdminStatus()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5" title="Atualizar diagnóstico">
-            <i class="fa-solid fa-rotate"></i>
-            <span class="hidden sm:inline">Atualizar</span>
-          </button>
-          <button onclick="toggleModalAdmin()" class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
+        <div class="flex gap-2 shrink-0">
+          <button onclick="loadAdminStatus()" class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700" title="Atualizar"><i class="fa-solid fa-rotate"></i></button>
+          <button onclick="toggleModalAdmin()" class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700"><i class="fa-solid fa-xmark"></i></button>
         </div>
       </div>
 
-      <!-- Corpo Rolável do Painel -->
-      <div class="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1 custom-scrollbar bg-slate-50">
-        
-        <!-- Aviso se estiver acessando pela Nuvem (Render) -->
-        <div id="admin-cloud-warning" class="hidden p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
-          <i class="fa-solid fa-triangle-exclamation text-amber-600 text-base mt-0.5"></i>
-          <div>
-            <strong>Ambiente em Nuvem Detectado (Modo Somente Leitura):</strong>
-            As etapas pesadas de mineração e IA Local rodam exclusivamente no seu <strong>PC Local (`http://localhost:8000` ou `executar_pipeline.bat`)</strong> para manter o servidor da nuvem ultraleve.
-          </div>
+      <div class="p-4 overflow-y-auto space-y-4 flex-1 custom-scrollbar bg-slate-50">
+        <div id="admin-cloud-warning" class="hidden p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900">
+          <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+          <strong>Ambiente em nuvem (somente leitura).</strong> Captura e IA rodam apenas no PC local (<code>executar_pipeline.bat</code> ou <code>http://localhost:8000/?painel=1</code>).
         </div>
 
-        <!-- 1. DIAGNÓSTICO DAS DUAS CAMADAS -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
-            <span class="text-[11px] font-bold text-slate-400 uppercase block">1. Maps & Lojas (PC)</span>
-            <span id="diag-stores" class="text-lg font-black text-slate-900 mt-0.5 block">--</span>
-            <span id="diag-discovered" class="text-[11px] text-slate-500">-- avistadas no Maps</span>
-          </div>
-          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
-            <span class="text-[11px] font-bold text-slate-400 uppercase block">2. Textos Extraídos</span>
-            <span id="diag-texts" class="text-lg font-black text-blue-600 mt-0.5 block">--</span>
-            <span id="diag-products" class="text-[11px] text-slate-500">-- produtos unitários</span>
-          </div>
-          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
-            <span class="text-[11px] font-bold text-slate-400 uppercase block">3. IA Local (Qwen 2.5)</span>
-            <span id="diag-ai" class="text-lg font-black text-purple-600 mt-0.5 block">--</span>
-            <span id="diag-ollama" class="text-[11px] text-slate-500">Ollama: verificando...</span>
-          </div>
-          <div class="bg-white p-3.5 rounded-xl border border-emerald-200 shadow-sm bg-emerald-50/30">
-            <span class="text-[11px] font-bold text-emerald-700 uppercase block">4. Banco Nuvem (Leve)</span>
-            <span id="diag-public-size" class="text-lg font-black text-emerald-700 mt-0.5 block">-- MB</span>
-            <span id="diag-public-info" class="text-[11px] text-emerald-800">-- lojas • -- leads</span>
-          </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+          <div class="bg-white p-3 rounded-2xl ring-1 ring-slate-200"><span class="text-[10px] font-bold text-slate-400 uppercase">1. Maps & lojas</span><p id="diag-stores" class="text-base font-extrabold text-slate-900">--</p><p id="diag-discovered" class="text-[11px] text-slate-500">--</p></div>
+          <div class="bg-white p-3 rounded-2xl ring-1 ring-slate-200"><span class="text-[10px] font-bold text-slate-400 uppercase">2. Textos dos sites</span><p id="diag-texts" class="text-base font-extrabold text-blue-600">--</p><p id="diag-products" class="text-[11px] text-slate-500">--</p></div>
+          <div class="bg-white p-3 rounded-2xl ring-1 ring-slate-200"><span class="text-[10px] font-bold text-slate-400 uppercase">3. IA local</span><p id="diag-ai" class="text-base font-extrabold text-purple-600">--</p><p id="diag-ollama" class="text-[11px] text-slate-500">--</p></div>
+          <div class="bg-white p-3 rounded-2xl ring-1 ring-emerald-200"><span class="text-[10px] font-bold text-emerald-700 uppercase">4. Banco nuvem</span><p id="diag-public-size" class="text-base font-extrabold text-emerald-700">--</p><p id="diag-public-info" class="text-[11px] text-emerald-800">--</p></div>
         </div>
 
-        <!-- 2. BOTÕES DE OPERAÇÃO POR ETAPA -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          
-          <!-- Etapa 1: Google Maps -->
-          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3">
-            <div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-map-location-dot text-blue-600 mr-1"></i> Etapa 1: Captura Google Maps</span>
-                <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">discovery_gmaps.py</span>
-              </div>
-              <p class="text-[11px] text-slate-500 mt-1">Busca novas lojas físicas de Ribeirão Preto no Google Maps sem custo de API.</p>
-            </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          <div class="bg-white p-3.5 rounded-2xl ring-1 ring-slate-200 space-y-2">
+            <p class="text-xs font-extrabold text-slate-800"><i class="fa-solid fa-map-location-dot text-blue-600 mr-1"></i> Etapa 1 — Captura Google Maps</p>
             <div class="flex gap-2">
-              <input id="admin-discover-query" type="text" placeholder="Ex: marmoraria, bicicletaria (vazio = todos)" class="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500" />
-              <button onclick="runAdminStep('discover')" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors shrink-0">
-                Rodar Maps
-              </button>
+              <input id="admin-discover-query" type="text" placeholder="Setor (vazio = todos)" class="flex-1 min-w-0 px-3 h-10 text-sm rounded-xl ring-1 ring-slate-200 focus:outline-none focus:ring-blue-500">
+              <button onclick="runAdminStep('discover')" class="px-3.5 h-10 bg-blue-600 text-white text-xs font-bold rounded-xl">Rodar</button>
             </div>
           </div>
-
-          <!-- Etapa 2: Captura Textual e Produtos -->
-          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3">
-            <div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-spider text-indigo-600 mr-1"></i> Etapa 2: Captura dos Sites Web</span>
-                <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">web_text_crawler.py</span>
-              </div>
-              <p class="text-[11px] text-slate-500 mt-1">Visita os sites das lojas e salva sempre os dados textuais (títulos, H1/H2, sobre) e produtos.</p>
-            </div>
+          <div class="bg-white p-3.5 rounded-2xl ring-1 ring-slate-200 space-y-2">
+            <p class="text-xs font-extrabold text-slate-800"><i class="fa-solid fa-spider text-indigo-600 mr-1"></i> Etapa 2 — Captura dos sites</p>
             <div class="flex flex-wrap gap-2">
-              <button onclick="runAdminStep('crawl-text', false)" class="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
-                Extrair Textos (Novos)
-              </button>
-              <button onclick="runAdminStep('crawl-text', true)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors" title="Re-visitar todos os sites">
-                Recapturar Todos
-              </button>
-              <button onclick="runAdminStep('scrap', false)" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors" title="Extrair produtos de e-commerces">
-                + E-commerces
-              </button>
+              <button onclick="runAdminStep('crawl-text', false)" class="flex-1 h-10 px-3 bg-indigo-600 text-white text-xs font-bold rounded-xl">Textos (novos)</button>
+              <button onclick="runAdminStep('crawl-text', true)" class="h-10 px-3 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl">Recapturar todos</button>
+              <button onclick="runAdminStep('scrap', false)" class="h-10 px-3 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl">+ E-commerces</button>
             </div>
           </div>
-
-          <!-- Etapa 3: Inteligência Artificial Local (Qwen 2.5 via Ollama) -->
-          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3">
-            <div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-brain text-purple-600 mr-1"></i> Etapa 3: Rodar IA Local (Qwen 2.5)</span>
-                <span class="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-semibold">enrich_with_llm.py</span>
-              </div>
-              <p class="text-[11px] text-slate-500 mt-1">Analisa os textos capturados com a LLM local (inicia o Ollama sozinho se estiver fechado).</p>
-            </div>
+          <div class="bg-white p-3.5 rounded-2xl ring-1 ring-slate-200 space-y-2">
+            <p class="text-xs font-extrabold text-slate-800"><i class="fa-solid fa-brain text-purple-600 mr-1"></i> Etapa 3 — IA local (Qwen 2.5)</p>
             <div class="flex gap-2">
-              <button onclick="runAdminStep('enrich-ai', false)" class="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
-                Rodar IA (Lojas Pendentes)
-              </button>
-              <button onclick="runAdminStep('enrich-ai', true)" class="px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold rounded-xl transition-colors" title="Reanalisar todas as lojas desde o início com a IA">
-                Re-rodar IA em Todas
-              </button>
+              <button onclick="runAdminStep('enrich-ai', false)" class="flex-1 h-10 px-3 bg-purple-600 text-white text-xs font-bold rounded-xl">Rodar (pendentes)</button>
+              <button onclick="runAdminStep('enrich-ai', true)" class="h-10 px-3 bg-purple-50 text-purple-800 text-xs font-bold rounded-xl">Re-rodar todas</button>
             </div>
           </div>
-
-          <!-- Etapa 4 e 5: Compilar Banco Leve + Subir para a Nuvem -->
-          <div class="bg-white p-4 rounded-xl border border-emerald-200 shadow-sm flex flex-col justify-between gap-3">
-            <div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-black text-slate-800 uppercase tracking-wide"><i class="fa-solid fa-cloud-arrow-up text-emerald-600 mr-1"></i> Etapas 4 e 5: Compilar & Subir p/ Nuvem</span>
-                <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-semibold">GitHub &rarr; Render</span>
-              </div>
-              <p class="text-[11px] text-slate-500 mt-1">Gera o banco leve (`compraribeirao_publico.db` ~3 MB) e publica no GitHub/Render.</p>
-            </div>
-            <div class="flex flex-col gap-2">
-              <div class="flex gap-2">
-                <button onclick="runAdminStep('build-kb', false)" class="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
-                  4. Compilar Banco Leve
-                </button>
-                <button onclick="runAdminStep('deploy', false)" class="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors">
-                  5. Subir p/ Nuvem (Git Push)
-                </button>
-              </div>
+          <div class="bg-white p-3.5 rounded-2xl ring-1 ring-emerald-200 space-y-2">
+            <p class="text-xs font-extrabold text-slate-800"><i class="fa-solid fa-cloud-arrow-up text-emerald-600 mr-1"></i> Etapas 4 e 5 — Compilar & subir</p>
+            <div class="flex gap-2">
+              <button onclick="runAdminStep('build-kb', false)" class="flex-1 h-10 px-3 bg-slate-800 text-white text-xs font-bold rounded-xl">4. Compilar banco</button>
+              <button onclick="runAdminStep('deploy', false)" class="flex-1 h-10 px-3 bg-emerald-600 text-white text-xs font-bold rounded-xl">5. Subir p/ nuvem</button>
             </div>
           </div>
-
         </div>
 
-        <!-- BOTÃO MESTRE: ESTEIRA COMPLETA -->
-        <div class="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 p-4 rounded-xl text-white flex flex-col sm:flex-row items-center justify-between gap-3 shadow">
-          <div>
-            <span class="text-xs font-black uppercase tracking-wider text-amber-400 block"><i class="fa-solid fa-bolt mr-1"></i> Automação em 1 Clique</span>
-            <span class="text-xs text-slate-200">Executa em sequência: <strong>Extrair Textos &rarr; Analisar com IA Qwen 2.5 &rarr; Compilar Banco Leve</strong></span>
-          </div>
-          <button onclick="runAdminStep('all', false)" class="w-full sm:w-auto px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow transition-all shrink-0">
-            Rodar Esteira Completa Agora
-          </button>
-        </div>
+        <button onclick="runAdminStep('all', false)" class="w-full p-3.5 rounded-2xl bg-gradient-to-r from-blue-900 to-indigo-900 text-white text-left flex items-center justify-between gap-3">
+          <span><span class="block text-[11px] font-extrabold uppercase text-amber-300"><i class="fa-solid fa-bolt mr-1"></i>Esteira completa</span><span class="text-xs text-slate-200">Textos → IA → Compilar banco leve</span></span>
+          <span class="px-4 h-9 rounded-xl bg-amber-400 text-slate-950 text-xs font-extrabold flex items-center">Rodar agora</span>
+        </button>
 
-        <!-- 3. CONSOLE DE LOGS EM TEMPO REAL -->
-        <div class="bg-slate-950 rounded-xl border border-slate-800 p-3.5 text-slate-200 font-mono text-xs">
+        <div class="bg-slate-950 rounded-2xl p-3 font-mono text-xs">
           <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
-            <div class="flex items-center gap-2">
-              <span id="admin-job-dot" class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
-              <span id="admin-job-status" class="font-bold text-[11px] text-slate-300">Console de Execução (Pronto)</span>
-            </div>
-            <button id="btn-stop-job" onclick="stopAdminJob()" class="hidden px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[10px] font-bold">
-              <i class="fa-solid fa-stop mr-1"></i> Parar Tarefa
-            </button>
+            <div class="flex items-center gap-2 min-w-0"><span id="admin-job-dot" class="w-2.5 h-2.5 rounded-full bg-slate-500 shrink-0"></span><span id="admin-job-status" class="text-[11px] text-slate-300 truncate">Console (pronto)</span></div>
+            <button id="btn-stop-job" onclick="stopAdminJob()" class="hidden px-2.5 py-1 bg-red-600 text-white rounded-lg text-[10px] font-bold">Parar</button>
           </div>
-          <pre id="admin-log-output" class="h-44 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-emerald-400 custom-scrollbar">Clique em qualquer etapa acima para acompanhar a execução em tempo real aqui...</pre>
+          <pre id="admin-log-output" class="h-44 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-emerald-400 custom-scrollbar">Clique em uma etapa para acompanhar a execução aqui...</pre>
         </div>
-
       </div>
     </div>
   </div>
 
-  <!-- FOOTER -->
-  <footer class="bg-slate-900 text-slate-400 text-xs py-8 mt-12 border-t border-slate-800">
-    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div class="flex items-center gap-2">
-        <div class="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm">
-          <i class="fa-solid fa-location-dot"></i>
-        </div>
-        <span class="font-bold text-white text-sm">CompraRibeirão</span>
-        <span class="text-slate-500">| Inteligência comercial para fortalecer o comércio físico de Ribeirão Preto - SP.</span>
-      </div>
-      <div class="flex items-center gap-4">
-        <span>Feito para o comerciante e consumidor de RP • v2.5</span>
-        <button onclick="toggleModalAdmin()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold transition-colors flex items-center gap-1.5 border border-slate-700">
-          <i class="fa-solid fa-sliders text-blue-400"></i>
-          <span>Painel de Controle</span>
-        </button>
-      </div>
-    </div>
-  </footer>
-
-  <!-- JAVASCRIPT DO SISTEMA -->
+  <!-- ===================================================================== -->
+  <!-- JAVASCRIPT                                                            -->
+  <!-- ===================================================================== -->
   <script>
-    let currentQuery = '';
-    let currentNeighborhood = '';
-    let currentOffset = 0;
-    const limit = 35;
-    let totalStores = 0;
-    let storesData = [];
-    
-    // Geolocalização do usuário ("Perto de Mim")
-    let userLat = null;
-    let userLng = null;
+    // -------------------------------------------------------------------------
+    // CONFIGURAÇÃO: setores rápidos (nome exibido, ícone, busca enviada à API, cores)
+    // -------------------------------------------------------------------------
+    const CATEGORIES = [
+      { name: 'Baterias',      icon: 'fa-car-battery',    query: 'bateria automotiva',                   bg: 'bg-amber-100',   fg: 'text-amber-600' },
+      { name: 'Construção',    icon: 'fa-trowel-bricks',  query: 'materiais de construcao tintas pisos', bg: 'bg-orange-100',  fg: 'text-orange-600' },
+      { name: 'Ferramentas',   icon: 'fa-screwdriver-wrench', query: 'ferramentas parafusos makita furadeira', bg: 'bg-slate-200', fg: 'text-slate-700' },
+      { name: 'Autopeças',     icon: 'fa-car',            query: 'auto pecas oleo freio',                bg: 'bg-red-100',     fg: 'text-red-600' },
+      { name: 'Pneus',         icon: 'fa-circle-dot',     query: 'pneus rodas alinhamento',              bg: 'bg-zinc-200',    fg: 'text-zinc-700' },
+      { name: 'Elétrica',      icon: 'fa-bolt',           query: 'materiais eletricos iluminacao',       bg: 'bg-yellow-100',  fg: 'text-yellow-600' },
+      { name: 'Hidráulica',    icon: 'fa-faucet-drip',    query: 'hidraulica tubos conexoes torneira',   bg: 'bg-cyan-100',    fg: 'text-cyan-600' },
+      { name: 'Piscinas',      icon: 'fa-water-ladder',   query: 'piscina cloro bombas',                 bg: 'bg-sky-100',     fg: 'text-sky-600' },
+      { name: 'Celular',       icon: 'fa-mobile-screen',  query: 'celular assistencia iphone',           bg: 'bg-blue-100',    fg: 'text-blue-600' },
+      { name: 'Informática',   icon: 'fa-laptop',         query: 'informatica computadores notebook',    bg: 'bg-indigo-100',  fg: 'text-indigo-600' },
+      { name: 'Segurança',     icon: 'fa-video',          query: 'cameras seguranca cftv alarmes',       bg: 'bg-violet-100',  fg: 'text-violet-600' },
+      { name: 'Móveis',        icon: 'fa-couch',          query: 'moveis colchoes decoracao',            bg: 'bg-rose-100',    fg: 'text-rose-600' },
+      { name: 'Óticas',        icon: 'fa-glasses',        query: 'otica oculos lentes',                  bg: 'bg-teal-100',    fg: 'text-teal-600' },
+      { name: 'Pet',           icon: 'fa-paw',            query: 'pet racao cachorro gato',              bg: 'bg-emerald-100', fg: 'text-emerald-600' },
+      { name: 'Música',        icon: 'fa-guitar',         query: 'instrumentos musicais violao',         bg: 'bg-fuchsia-100', fg: 'text-fuchsia-600' },
+      { name: 'Bicicletas',    icon: 'fa-bicycle',        query: 'bicicleta bike pecas',                 bg: 'bg-lime-100',    fg: 'text-lime-700' },
+    ];
+    const PLACEHOLDERS = ['Ex: bateria Moura, porcelanato...', 'Ex: parafuso sextavado', 'Ex: consertar celular', 'Ex: furadeira Makita', 'Ex: ração para cachorro', 'Ex: cloro para piscina', 'Ex: tinta Suvinil'];
+    const AVATAR_COLORS = ['from-blue-500 to-indigo-600', 'from-emerald-500 to-teal-600', 'from-orange-500 to-red-500', 'from-violet-500 to-purple-600', 'from-amber-500 to-orange-600', 'from-sky-500 to-blue-600', 'from-rose-500 to-pink-600', 'from-slate-600 to-slate-800'];
+    const CITY_CENTER = [-21.1775, -47.8103];
+    const PAGE_SIZE = 20;
 
-    // Mapas e Dicionários de Marcadores
-    let leafletMap = null;
-    let markersLayer = null;
-    let fullscreenMap = null;
-    let fullscreenMarkersLayer = null;
-    let currentValidCoords = [];
-    let inlineMarkersById = {};
-    let fsMarkersById = {};
+    // -------------------------------------------------------------------------
+    // ESTADO DA APLICAÇÃO
+    // -------------------------------------------------------------------------
+    let currentQuery = '';          // texto digitado
+    let activeCategory = null;      // setor rápido selecionado
+    let currentNeighborhood = '';   // bairro selecionado
+    let userLat = null, userLng = null;
+    let storesData = [], totalStores = 0, isLoading = false, nearbyDividerShown = false;
+    let neighborhoods = [];
 
-    // Inicialização do Mapa Inline (OpenStreetMap Standard - 100% Free, Sem API Key)
-    function initMap() {
-      leafletMap = L.map('leaflet-map').setView([-21.1775, -47.8103], 12);
-      
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19
-      }).addTo(leafletMap);
+    // Mapas
+    let inlineMap = null, inlineLayer = null, inlineMarkers = {}, inlineActive = null;
+    let overlayMap = null, overlayLayer = null, overlayMarkers = {}, overlayActive = null;
+    let userMarkers = [];
+    let carouselObserver = null, programmaticScroll = false;
 
-      markersLayer = L.layerGroup().addTo(leafletMap);
+    // -------------------------------------------------------------------------
+    // UTILITÁRIOS
+    // -------------------------------------------------------------------------
+    const $ = (id) => document.getElementById(id);
+    function esc(v) {
+      return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
-
-    // Inicialização do Mapa Fullscreen
-    function initFullscreenMap() {
-      if (fullscreenMap) return;
-      fullscreenMap = L.map('fullscreen-leaflet-map').setView([-21.1775, -47.8103], 12);
-
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19
-      }).addTo(fullscreenMap);
-
-      fullscreenMarkersLayer = L.layerGroup().addTo(fullscreenMap);
+    function norm(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+    function hashIdx(str, mod) { let h = 0; for (const ch of String(str || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % mod; }
+    function initials(name) {
+      const words = String(name || '?').replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(w => w.length > 2 || /^\d/.test(w));
+      return ((words[0] || name || '?')[0] + (words[1] ? words[1][0] : '')).toUpperCase();
     }
+    function coordsOf(s) {
+      const lat = parseFloat(s.latitude), lng = parseFloat(s.longitude);
+      return (!isNaN(lat) && !isNaN(lng)) ? [lat, lng] : null;
+    }
+    function routeUrl(s) {
+      const c = coordsOf(s);
+      return c ? `https://www.google.com/maps/dir/?api=1&destination=${c[0]},${c[1]}`
+               : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((s.name || '') + ' ' + (s.address || 'Ribeirão Preto'))}`;
+    }
+    function telUrl(s) {
+      let d = String(s.whatsapp || '').replace(/\D/g, '');
+      if (!d) return '';
+      if (!d.startsWith('55')) d = '55' + d;
+      return `tel:+${d}`;
+    }
+    function distLabel(s) {
+      if (s.distance_km !== null && s.distance_km !== undefined) {
+        const km = Number(s.distance_km);
+        return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1).replace('.', ',')} km`;
+      }
+      return s.neighborhood || 'Ribeirão Preto';
+    }
+    function toast(msg, ms = 2600) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.classList.remove('opacity-0', 'translate-y-3');
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => t.classList.add('opacity-0', 'translate-y-3'), ms);
+    }
+    function vibrate() { try { navigator.vibrate && navigator.vibrate(8); } catch (e) {} }
 
-    // Rastreamento Silencioso de Leads (WhatsApp / GPS / Site)
+    // Rastreamento silencioso de cliques (prova de valor para lojistas)
     function trackLead(storeId, storeName, actionType) {
       try {
-        const payload = JSON.stringify({
-          store_id: storeId,
-          store_name: storeName,
-          action_type: actionType,
-          search_query: currentQuery,
-          neighborhood: currentNeighborhood
-        });
         fetch('/api/track-lead', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload,
-          keepalive: true
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+          body: JSON.stringify({ store_id: storeId, store_name: storeName, action_type: actionType,
+                                 search_query: activeCategory ? activeCategory.query : currentQuery, neighborhood: currentNeighborhood })
         }).catch(() => {});
       } catch (e) {}
     }
+    function trackIdx(idx, type) { const s = storesData[idx]; if (s) trackLead(s.id, s.name, type); }
 
-    // Ativar / Desativar "Perto de Mim (GPS)"
-    function toggleNearMe() {
-      const btn = document.getElementById('btn-near-me');
-      const label = document.getElementById('near-me-label');
+    // -------------------------------------------------------------------------
+    // CAMADAS (bottom sheets) com suporte ao botão "voltar" do celular
+    // -------------------------------------------------------------------------
+    const layerStack = [];
+    let ignorePop = false;
 
-      if (userLat !== null && userLng !== null) {
-        userLat = null;
-        userLng = null;
-        btn.className = "self-start md:self-auto shrink-0 inline-flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 border border-slate-200 px-3.5 py-2 rounded-xl transition-all";
-        label.innerText = "Perto de Mim (GPS)";
-        executeSearch();
-        return;
-      }
-
-      if (!navigator.geolocation) {
-        alert("Seu navegador não suporta geolocalização. Selecione seu bairro na lista ao lado!");
-        return;
-      }
-
-      label.innerText = "Localizando...";
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          userLat = pos.coords.latitude;
-          userLng = pos.coords.longitude;
-          btn.className = "self-start md:self-auto shrink-0 inline-flex items-center gap-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-600 px-3.5 py-2 rounded-xl shadow-sm transition-all";
-          label.innerText = "GPS Ativo (Mais Próximas)";
-          executeSearch();
-        },
-        () => {
-          // Se o usuário estiver no PC sem GPS ou negar permissão, usa o centro de Ribeirão ou o bairro selecionado
-          label.innerText = "Perto de Mim (GPS)";
-          alert("Não foi possível obter o GPS exato. Dica: selecione o seu bairro na caixa ao lado da busca para ver as lojas mais próximas!");
-        },
-        { enableHighAccuracy: true, timeout: 6000 }
-      );
+    function openLayer(id) {
+      if (layerStack.includes(id)) return;
+      const el = $(id);
+      if (el.dataset.kind === 'full') el.classList.remove('hidden');
+      requestAnimationFrame(() => el.classList.add('open'));
+      layerStack.push(id);
+      history.pushState({ layer: id }, '');
+      document.body.style.overflow = 'hidden';
+      updateNav();
     }
+    function hideLayerEl(id) {
+      const el = $(id);
+      el.classList.remove('open');
+      if (el.dataset.kind === 'full') el.classList.add('hidden');
+      if (!layerStack.length) document.body.style.overflow = '';
+      updateNav();
+    }
+    function closeTopLayer(fromPop = false) {
+      const id = layerStack.pop();
+      if (!id) return;
+      hideLayerEl(id);
+      if (!fromPop) { ignorePop = true; history.back(); }
+    }
+    // Troca uma camada por outra sem mexer no histórico (ex.: detalhe -> mapa)
+    function swapLayer(fromId, toId) {
+      const i = layerStack.indexOf(fromId);
+      if (i >= 0) layerStack.splice(i, 1);
+      $(fromId).classList.remove('open');
+      const el = $(toId);
+      if (el.dataset.kind === 'full') el.classList.remove('hidden');
+      requestAnimationFrame(() => el.classList.add('open'));
+      layerStack.push(toId);
+      history.replaceState({ layer: toId }, '');
+      updateNav();
+    }
+    window.addEventListener('popstate', () => {
+      if (ignorePop) { ignorePop = false; return; }
+      if (layerStack.length) closeTopLayer(true);
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && layerStack.length) closeTopLayer(); });
 
-    // Atualização dos Marcadores nos Mapas
-    function updateMapMarkers(stores) {
-      if (markersLayer) markersLayer.clearLayers();
-      if (fullscreenMarkersLayer) fullscreenMarkersLayer.clearLayers();
-
-      currentValidCoords = [];
-      inlineMarkersById = {};
-      fsMarkersById = {};
-
-      const drawerList = document.getElementById('drawer-stores-list');
-      if (drawerList) drawerList.innerHTML = '';
-
-      const mobileDrawer = document.getElementById('mobile-map-drawer');
-      if (mobileDrawer) mobileDrawer.innerHTML = '';
-
-      stores.forEach((store) => {
-        if (store.latitude && store.longitude) {
-          const lat = parseFloat(store.latitude);
-          const lng = parseFloat(store.longitude);
-
-          if (!isNaN(lat) && !isNaN(lng)) {
-            currentValidCoords.push([lat, lng]);
-
-            const isSponsored = store.is_sponsored === 1;
-            const markerColor = isSponsored ? '#f59e0b' : '#2563eb';
-            
-            const customIcon = L.divIcon({
-              className: 'custom-pin',
-              html: `
-                <div style="background-color: ${markerColor}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: 2px solid white; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); font-size: 12px; font-weight: bold;">
-                  <i class="fa-solid fa-store text-[11px]"></i>
-                </div>
-              `,
-              iconSize: [28, 28],
-              iconAnchor: [14, 14]
-            });
-
-            const gmapsRouteUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-            const safeName = (store.name || '').replace(/'/g, "\\'");
-
-            const popupContent = `
-              <div class="p-1 max-w-[250px]">
-                <div class="font-bold text-sm text-slate-900 leading-tight">${store.name}</div>
-                <div class="text-xs text-blue-600 font-semibold mt-0.5">${store.proximity_badge || store.neighborhood}</div>
-                <div class="text-[11px] text-slate-500 mt-1">${store.address || ''}</div>
-                ${store.phone_display ? `<div class="text-[11px] font-bold text-slate-700 mt-1"><i class="fa-solid fa-phone"></i> ${store.phone_display}</div>` : ''}
-                
-                <div class="mt-2.5 flex flex-col gap-1.5">
-                  ${store.whatsapp_url ? `
-                    <a href="${store.whatsapp_url}" target="_blank" onclick="trackLead('${store.id}', '${safeName}', 'whatsapp')" class="block w-full py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-center font-bold text-xs rounded-lg shadow transition-colors">
-                      <i class="fa-brands fa-whatsapp mr-1"></i> Chamar no WhatsApp
-                    </a>
-                  ` : ''}
-                  <a href="${gmapsRouteUrl}" target="_blank" onclick="trackLead('${store.id}', '${safeName}', 'gps')" class="block w-full py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-center font-bold text-xs rounded-lg transition-colors">
-                    <i class="fa-solid fa-diamond-turn-right text-blue-600 mr-1"></i> Abrir Rota GPS
-                  </a>
-                </div>
-              </div>
-            `;
-
-            if (markersLayer) {
-              const marker = L.marker([lat, lng], { icon: customIcon });
-              marker.bindPopup(popupContent);
-              markersLayer.addLayer(marker);
-              inlineMarkersById[store.id] = marker;
-            }
-
-            if (fullscreenMarkersLayer) {
-              const markerFs = L.marker([lat, lng], { icon: customIcon });
-              markerFs.bindPopup(popupContent);
-              fullscreenMarkersLayer.addLayer(markerFs);
-              fsMarkersById[store.id] = markerFs;
-            }
-
-            // Item na gaveta lateral (Desktop)
-            if (drawerList) {
-              const item = document.createElement('div');
-              item.className = "p-2.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 rounded-xl cursor-pointer transition-colors";
-              item.onclick = () => {
-                if (fullscreenMap) {
-                  fullscreenMap.flyTo([lat, lng], 16, { duration: 0.9 });
-                  if (fsMarkersById[store.id]) fsMarkersById[store.id].openPopup();
-                }
-              };
-              item.innerHTML = `
-                <div class="font-bold text-slate-900 line-clamp-1">${store.name}</div>
-                <div class="text-[11px] text-blue-600 font-semibold">${store.proximity_badge || store.neighborhood}</div>
-                <div class="text-[10px] text-slate-400 mt-0.5 line-clamp-1">${store.category || ''}</div>
-              `;
-              drawerList.appendChild(item);
-            }
-
-            // Card compacto no carrossel inferior (Mobile)
-            if (mobileDrawer) {
-              const mobCard = document.createElement('div');
-              mobCard.className = "shrink-0 w-64 bg-white/95 backdrop-blur-md p-3 rounded-xl shadow-lg border border-slate-200 flex flex-col justify-between";
-              mobCard.onclick = () => {
-                if (fullscreenMap) {
-                  fullscreenMap.flyTo([lat, lng], 16, { duration: 0.9 });
-                  if (fsMarkersById[store.id]) fsMarkersById[store.id].openPopup();
-                }
-              };
-              mobCard.innerHTML = `
-                <div>
-                  <div class="font-bold text-xs text-slate-900 line-clamp-1">${store.name}</div>
-                  <div class="text-[11px] text-blue-600 font-semibold mt-0.5">${store.proximity_badge || store.neighborhood}</div>
-                </div>
-                <div class="mt-2 flex items-center gap-1.5">
-                  ${store.whatsapp_url ? `<a href="${store.whatsapp_url}" target="_blank" onclick="event.stopPropagation(); trackLead('${store.id}', '${safeName}', 'whatsapp')" class="flex-1 py-1 bg-emerald-600 text-white text-center font-bold text-[11px] rounded-lg"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>` : ''}
-                  <a href="${gmapsRouteUrl}" target="_blank" onclick="event.stopPropagation(); trackLead('${store.id}', '${safeName}', 'gps')" class="px-2.5 py-1 bg-slate-100 text-slate-700 font-bold text-[11px] rounded-lg"><i class="fa-solid fa-diamond-turn-right text-blue-600"></i> GPS</a>
-                </div>
-              `;
-              mobileDrawer.appendChild(mobCard);
-            }
-
-          }
-        }
+    // Arrastar o sheet para baixo para fechar (gesto nativo de app)
+    function enableSwipeToClose(layerId) {
+      const panel = $(layerId).querySelector('.panel');
+      let startY = null, dy = 0;
+      panel.addEventListener('touchstart', (e) => {
+        if (panel.scrollTop > 0) { startY = null; return; }
+        startY = e.touches[0].clientY; dy = 0; panel.style.transition = 'none';
+      }, { passive: true });
+      panel.addEventListener('touchmove', (e) => {
+        if (startY === null) return;
+        dy = e.touches[0].clientY - startY;
+        if (dy > 0) panel.style.transform = `translateY(${dy}px)`;
+      }, { passive: true });
+      panel.addEventListener('touchend', () => {
+        if (startY === null) return;
+        panel.style.transition = ''; panel.style.transform = '';
+        if (dy > 110) closeTopLayer();
+        startY = null;
       });
-
-      const countText = `${currentValidCoords.length} pontos`;
-      const counterEl = document.getElementById('map-counter');
-      if (counterEl) counterEl.innerText = countText;
-
-      const fsCounter = document.getElementById('fullscreen-map-counter');
-      if (fsCounter) fsCounter.innerText = `${currentValidCoords.length} estabelecimentos mapeados`;
-
-      const drawerCounter = document.getElementById('drawer-counter');
-      if (drawerCounter) drawerCounter.innerText = `${currentValidCoords.length}`;
-
-      fitAllMapBounds();
     }
 
-    function fitAllMapBounds() {
-      if (!leafletMap) return;
-      if (currentValidCoords.length > 0) {
-        const bounds = L.latLngBounds(currentValidCoords);
-        leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
-      } else {
-        leafletMap.setView([-21.1775, -47.8103], 12);
+    function updateNav() {
+      const top = layerStack[layerStack.length - 1];
+      const active = top === 'map-layer' ? 'nav-map' : top === 'lojista-layer' ? 'nav-lojista' : 'nav-home';
+      document.querySelectorAll('.nav-btn').forEach(b => {
+        b.classList.toggle('text-blue-600', b.id === active);
+        b.classList.toggle('text-slate-400', b.id !== active);
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // SETORES RÁPIDOS
+    // -------------------------------------------------------------------------
+    function renderCategories() {
+      $('categories').innerHTML = CATEGORIES.map((c, i) => {
+        const active = activeCategory === c;
+        return `
+          <button onclick="pickCategory(${i})" class="snap-start shrink-0 w-[76px] flex flex-col items-center gap-1.5 group">
+            <span class="w-[60px] h-[60px] rounded-[20px] ${c.bg} ${c.fg} flex items-center justify-center text-[22px] transition
+                         ${active ? 'ring-[3px] ring-blue-600 ring-offset-2 ring-offset-slate-50 scale-105' : 'group-active:scale-95'}">
+              <i class="fa-solid ${c.icon}"></i>
+            </span>
+            <span class="text-[11.5px] font-bold ${active ? 'text-blue-700' : 'text-slate-600'} text-center leading-tight">${c.name}</span>
+          </button>`;
+      }).join('');
+    }
+    function pickCategory(i) {
+      vibrate();
+      const c = CATEGORIES[i];
+      if (activeCategory === c) { activeCategory = null; $('search-input').value = ''; }
+      else { activeCategory = c; $('search-input').value = c.name; }
+      syncClearBtn();
+      renderCategories();
+      executeSearch();
+      scrollToResults();
+    }
+
+    // -------------------------------------------------------------------------
+    // BUSCA: input, buscas recentes e placeholder animado
+    // -------------------------------------------------------------------------
+    function syncClearBtn() {
+      const has = $('search-input').value.trim().length > 0;
+      $('btn-clear').classList.toggle('hidden', !has);
+      $('btn-clear').classList.toggle('flex', has);
+    }
+    function onSearchInput() {
+      if (activeCategory) { activeCategory = null; renderCategories(); }
+      syncClearBtn();
+      renderRecent();
+    }
+    function onSearchFocus() { renderRecent(); setFab(false); }
+    function onSearchBlur() { setTimeout(() => { $('recent-box').classList.add('hidden'); setFab(storesData.length > 0); }, 150); }
+    function clearSearch() {
+      $('search-input').value = ''; activeCategory = null;
+      syncClearBtn(); renderCategories(); executeSearch();
+      $('search-input').focus();
+    }
+    function submitSearch() {
+      $('search-input').blur();
+      $('recent-box').classList.add('hidden');
+      const q = $('search-input').value.trim();
+      if (q && !activeCategory) saveRecent(q);
+      executeSearch();
+      scrollToResults();
+    }
+    function focusSearch() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setTimeout(() => $('search-input').focus(), 320);
+    }
+    function scrollToResults() {
+      if (window.innerWidth < 1024) setTimeout(() => $('results-anchor').scrollIntoView({ behavior: 'smooth' }), 60);
+    }
+    function getRecent() { try { return JSON.parse(localStorage.getItem('cr_recent') || '[]'); } catch (e) { return []; } }
+    function saveRecent(q) {
+      const list = [q, ...getRecent().filter(x => norm(x) !== norm(q))].slice(0, 6);
+      localStorage.setItem('cr_recent', JSON.stringify(list));
+    }
+    function clearRecent() { localStorage.removeItem('cr_recent'); $('recent-box').classList.add('hidden'); }
+    function renderRecent() {
+      const list = getRecent();
+      const box = $('recent-box');
+      if (!list.length || $('search-input').value.trim() || document.activeElement !== $('search-input')) { box.classList.add('hidden'); return; }
+      $('recent-list').innerHTML = list.map((q, i) => `
+        <button type="button" onmousedown="event.preventDefault(); useRecent(${i})" class="h-9 px-3 rounded-full bg-slate-100 text-[13px] font-semibold text-slate-700 flex items-center gap-2">
+          <i class="fa-solid fa-clock-rotate-left text-slate-400 text-xs"></i>${esc(q)}
+        </button>`).join('');
+      box.classList.remove('hidden');
+    }
+    function useRecent(i) { $('search-input').value = getRecent()[i] || ''; syncClearBtn(); submitSearch(); }
+
+    let phIdx = 0;
+    setInterval(() => {
+      const inp = $('search-input');
+      if (document.activeElement === inp || inp.value) return;
+      phIdx = (phIdx + 1) % PLACEHOLDERS.length;
+      inp.placeholder = PLACEHOLDERS[phIdx];
+    }, 3200);
+
+    // -------------------------------------------------------------------------
+    // LOCALIZAÇÃO: "Perto de mim" e bairros
+    // -------------------------------------------------------------------------
+    function setNearChip(state) {
+      const chip = $('chip-near'), label = $('chip-near-label'), mapBtn = $('map-near-btn');
+      chip.classList.toggle('bg-white', state === 'on');
+      chip.classList.toggle('text-blue-700', state === 'on');
+      chip.classList.toggle('bg-white/15', state !== 'on');
+      label.textContent = state === 'on' ? 'Perto de mim ✓' : state === 'loading' ? 'Localizando…' : 'Perto de mim';
+      mapBtn.classList.toggle('bg-blue-600', state === 'on');
+      mapBtn.classList.toggle('text-white', state === 'on');
+      mapBtn.classList.toggle('bg-white', state !== 'on');
+    }
+    function toggleNearMe() {
+      if (userLat !== null) {
+        userLat = userLng = null; setNearChip('off'); clearUserMarkers(); executeSearch();
+        toast('Localização desativada');
+        return;
       }
+      enableNearMe();
     }
-
-    function fitAllFullscreenBounds() {
-      if (!fullscreenMap) return;
-      if (currentValidCoords.length > 0) {
-        const bounds = L.latLngBounds(currentValidCoords);
-        fullscreenMap.fitBounds(bounds, { padding: [45, 45], maxZoom: 15 });
-      } else {
-        fullscreenMap.setView([-21.1775, -47.8103], 12);
-      }
+    function enableNearMe() {
+      if (!navigator.geolocation) { toast('Seu navegador não permite localização. Escolha o bairro.'); openNeighborhoods(); return; }
+      setNearChip('loading');
+      navigator.geolocation.getCurrentPosition((pos) => {
+        userLat = pos.coords.latitude; userLng = pos.coords.longitude;
+        currentNeighborhood = ''; $('chip-neigh-label').textContent = 'Todos os bairros';
+        setNearChip('on');
+        const farKm = haversine(userLat, userLng, CITY_CENTER[0], CITY_CENTER[1]);
+        toast(farKm > 35 ? 'Você parece estar fora de Ribeirão — distâncias a partir de você.' : '📍 Mostrando as lojas mais próximas de você');
+        executeSearch();
+      }, () => {
+        setNearChip('off');
+        toast('Não consegui sua localização. Escolha seu bairro 👇');
+        openNeighborhoods();
+      }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
     }
-
-    function openFullscreenMap() {
-      const modal = document.getElementById('modal-map-fullscreen');
-      modal.classList.remove('hidden');
-
-      initFullscreenMap();
-      updateMapMarkers(storesData);
-
-      setTimeout(() => {
-        if (fullscreenMap) {
-          fullscreenMap.invalidateSize();
-          fitAllFullscreenBounds();
-        }
-      }, 200);
-    }
-
-    function closeFullscreenMap() {
-      const modal = document.getElementById('modal-map-fullscreen');
-      modal.classList.add('hidden');
-    }
-
-    // Foca o mapa em uma loja específica e abre o balão dela
-    function focusStoreOnMap(lat, lng, storeId) {
-      if (leafletMap) {
-        leafletMap.flyTo([lat, lng], 16, { duration: 1.0 });
-        if (inlineMarkersById[storeId]) {
-          setTimeout(() => inlineMarkersById[storeId].openPopup(), 400);
-        }
-        if (window.innerWidth < 1024) {
-          document.getElementById('col-map').scrollIntoView({ behavior: 'smooth' });
-        }
-      }
+    function haversine(a, b, c, d) {
+      const R = 6371, toR = x => x * Math.PI / 180;
+      const dLat = toR(c - a), dLng = toR(d - b);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a)) * Math.cos(toR(c)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
     }
 
     async function loadNeighborhoods() {
       try {
         const res = await fetch('/api/neighborhoods');
-        const data = await res.json();
-        const select = document.getElementById('filter-neighborhood');
-        select.innerHTML = '<option value="">Todos os Bairros de Ribeirão Preto</option>';
-        data.forEach(item => {
-          const opt = document.createElement('option');
-          opt.value = item.name;
-          opt.textContent = `${item.name} (${item.count} lojas)`;
-          select.appendChild(opt);
-        });
-      } catch (e) {
-        console.error('Erro ao carregar bairros:', e);
-      }
+        neighborhoods = await res.json();
+        renderNeighborhoodList('');
+      } catch (e) {}
     }
-
-    async function loadStats() {
-      try {
-        const res = await fetch('/api/stats');
-        const data = await res.json();
-        if (data.stores_count) {
-          document.getElementById('stats-badge').innerText = `${data.stores_count} lojas físicas • ${data.neighborhoods_count} bairros de RP • Conexão Direta WhatsApp`;
-        }
-      } catch (e) {
-        console.error('Erro ao carregar stats:', e);
-      }
+    function renderNeighborhoodList(filter) {
+      const f = norm(filter);
+      const items = neighborhoods.map((n, i) => ({ ...n, i })).filter(n => norm(n.name).includes(f));
+      const row = (label, count, onclick, selected) => `
+        <button onclick="${onclick}" class="w-full flex items-center justify-between gap-3 px-3 h-12 rounded-xl text-left ${selected ? 'bg-blue-50 text-blue-700' : 'hover:bg-slate-50 text-slate-700'}">
+          <span class="flex items-center gap-3 min-w-0"><i class="fa-solid ${selected ? 'fa-circle-check text-blue-600' : 'fa-location-dot text-slate-300'}"></i>
+            <span class="truncate text-[15px] font-semibold">${label}</span></span>
+          ${count !== null ? `<span class="text-xs font-bold text-slate-400 shrink-0">${count} lojas</span>` : ''}
+        </button>`;
+      $('neigh-list').innerHTML =
+        (f ? '' : row('Toda Ribeirão Preto', null, 'selectNeighborhood(-1)', !currentNeighborhood)) +
+        (items.length ? items.map(n => row(esc(n.name), n.count, `selectNeighborhood(${n.i})`, n.name === currentNeighborhood)).join('')
+                      : `<p class="text-center text-sm text-slate-400 py-8">Nenhum bairro encontrado</p>`);
     }
-
-    function toggleClearBtn() {
-      const val = document.getElementById('search-input').value;
-      const btn = document.getElementById('btn-clear-search');
-      if (val && val.length > 0) {
-        btn.classList.remove('hidden');
-        btn.classList.add('flex');
-      } else {
-        btn.classList.add('hidden');
-        btn.classList.remove('flex');
-      }
+    function openNeighborhoods() {
+      $('neigh-search').value = '';
+      renderNeighborhoodList('');
+      openLayer('neigh-layer');
     }
-
-    function clearSearchInput() {
-      document.getElementById('search-input').value = '';
-      toggleClearBtn();
+    function selectNeighborhood(i) {
+      vibrate();
+      currentNeighborhood = i >= 0 ? neighborhoods[i].name : '';
+      $('chip-neigh-label').textContent = currentNeighborhood || 'Todos os bairros';
+      if (currentNeighborhood && userLat !== null) { userLat = userLng = null; setNearChip('off'); clearUserMarkers(); }
+      closeTopLayer();
       executeSearch();
+      scrollToResults();
     }
 
-    // Buscar Lojas Locais
+    // -------------------------------------------------------------------------
+    // BUSCA NA API + RENDERIZAÇÃO DA LISTA
+    // -------------------------------------------------------------------------
+    function skeletonHTML() {
+      return Array.from({ length: 4 }).map(() => `
+        <div class="bg-white rounded-3xl p-4 ring-1 ring-slate-100">
+          <div class="flex gap-3"><div class="skeleton w-12 h-12 rounded-2xl"></div>
+            <div class="flex-1 space-y-2"><div class="skeleton h-3 w-20"></div><div class="skeleton h-4 w-3/4"></div><div class="skeleton h-3 w-1/2"></div></div></div>
+          <div class="skeleton h-3 w-full mt-4"></div><div class="skeleton h-3 w-5/6 mt-2"></div>
+          <div class="flex gap-2 mt-4"><div class="skeleton h-11 flex-1 rounded-xl"></div><div class="skeleton h-11 w-11 rounded-xl"></div><div class="skeleton h-11 w-11 rounded-xl"></div></div>
+        </div>`).join('');
+    }
+
     async function executeSearch(isLoadMore = false) {
-      if (!isLoadMore) {
-        currentOffset = 0;
-        storesData = [];
-      }
-
-      currentQuery = document.getElementById('search-input').value.trim();
-      currentNeighborhood = document.getElementById('filter-neighborhood').value;
-      toggleClearBtn();
-
-      const container = document.getElementById('stores-container');
-      const countBadge = document.getElementById('results-count');
-      const emptyState = document.getElementById('empty-state');
-      const loadMoreContainer = document.getElementById('load-more-container');
+      if (isLoading) return;
+      isLoading = true;
+      currentQuery = $('search-input').value.trim();
+      const apiQuery = activeCategory ? activeCategory.query : currentQuery;
+      const list = $('stores-list');
 
       if (!isLoadMore) {
-        container.innerHTML = `
-          <div class="text-center py-12 text-slate-400">
-            <i class="fa-solid fa-spinner fa-spin text-2xl text-blue-600 mb-2"></i>
-            <p class="text-xs font-semibold">Localizando lojas físicas especializadas em Ribeirão Preto...</p>
-          </div>
-        `;
+        storesData = []; nearbyDividerShown = false;
+        list.innerHTML = skeletonHTML();
+        $('list-end').classList.add('hidden');
+        $('header-search-text').textContent = currentQuery || 'Buscar em Ribeirão';
       }
+
+      let url = `/api/local-search?q=${encodeURIComponent(apiQuery)}&neighborhood=${encodeURIComponent(currentNeighborhood)}&limit=${PAGE_SIZE}&offset=${storesData.length}`;
+      if (userLat !== null) url += `&user_lat=${userLat}&user_lng=${userLng}`;
 
       try {
-        let url = `/api/local-search?q=${encodeURIComponent(currentQuery)}&neighborhood=${encodeURIComponent(currentNeighborhood)}&limit=${limit}&offset=${currentOffset}`;
-        if (userLat !== null && userLng !== null) {
-          url += `&user_lat=${userLat}&user_lng=${userLng}`;
-        }
-
         const res = await fetch(url);
         const data = await res.json();
+        totalStores = data.total || 0;
+        const start = storesData.length;
+        storesData = storesData.concat(data.stores || []);
 
-        totalStores = data.total;
-        if (!isLoadMore) {
-          storesData = data.stores;
+        if (!isLoadMore) list.innerHTML = '';
+        if (!storesData.length) {
+          list.innerHTML = emptyStateHTML();
         } else {
-          storesData = storesData.concat(data.stores);
-        }
-
-        countBadge.innerText = `${totalStores} estabelecimentos`;
-
-        if (storesData.length === 0) {
-          container.innerHTML = '';
-          emptyState.classList.remove('hidden');
-          loadMoreContainer.classList.add('hidden');
-          updateMapMarkers([]);
-          return;
-        }
-
-        emptyState.classList.add('hidden');
-        container.innerHTML = '';
-
-        let shownNearbyDivider = false;
-
-        storesData.forEach(store => {
-          // Se o usuário selecionou um bairro e estamos entrando nas lojas próximas de bairros vizinhos, insere um divisor amigável
-          if (currentNeighborhood && !store.in_selected_neighborhood && !shownNearbyDivider) {
-            shownNearbyDivider = true;
-            const divider = document.createElement('div');
-            divider.className = "py-2.5 px-4 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 flex items-center gap-2";
-            divider.innerHTML = `
-              <i class="fa-solid fa-compass text-indigo-600"></i>
-              <span>Lojas especializadas próximas a <strong>${currentNeighborhood}</strong> (em bairros vizinhos):</span>
-            `;
-            container.appendChild(divider);
+          let html = '';
+          for (let i = start; i < storesData.length; i++) {
+            const s = storesData[i];
+            if (currentNeighborhood && !s.in_selected_neighborhood && !nearbyDividerShown) {
+              nearbyDividerShown = true;
+              html += `<div class="flex items-center gap-2 py-2 px-1 text-xs font-bold text-indigo-700"><i class="fa-solid fa-compass"></i>Também perto de ${esc(currentNeighborhood)} (bairros vizinhos)</div>`;
+            }
+            html += storeCardHTML(s, i);
           }
-
-          const card = createStoreCard(store);
-          container.appendChild(card);
-        });
-
-        updateMapMarkers(storesData);
-
-        if (storesData.length < totalStores) {
-          loadMoreContainer.classList.remove('hidden');
-        } else {
-          loadMoreContainer.classList.add('hidden');
+          list.insertAdjacentHTML('beforeend', html);
         }
-
+        $('list-end').classList.toggle('hidden', !(storesData.length && storesData.length >= totalStores && totalStores > PAGE_SIZE));
+        updateResultsHeader();
+        updateAllMarkers();
+        setFab(storesData.length > 0 && document.activeElement !== $('search-input'));
       } catch (e) {
-        console.error('Erro na busca:', e);
-        container.innerHTML = `
-          <div class="p-4 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
-            Erro ao carregar dados locais. Por favor tente novamente.
-          </div>
-        `;
+        if (!isLoadMore) list.innerHTML = `
+          <div class="text-center bg-white rounded-3xl p-8 ring-1 ring-slate-200">
+            <i class="fa-solid fa-wifi text-3xl text-slate-300"></i>
+            <p class="font-bold text-slate-800 mt-3">Não foi possível carregar</p>
+            <p class="text-sm text-slate-500 mt-1">Verifique sua conexão. O servidor pode estar acordando (leva alguns segundos).</p>
+            <button onclick="executeSearch()" class="mt-4 h-11 px-5 rounded-xl bg-blue-600 text-white font-bold text-sm">Tentar novamente</button>
+          </div>`;
+      } finally {
+        isLoading = false;
       }
     }
 
-    // Criador do Card de Loja Física
-    function createStoreCard(store) {
-      const card = document.createElement('div');
-      card.className = "bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-all relative overflow-hidden group";
+    function updateResultsHeader() {
+      const label = activeCategory ? activeCategory.name : currentQuery;
+      $('results-title').textContent = label ? `Resultados para “${label}”` : 'Lojas recomendadas';
+      $('results-kicker').textContent = userLat !== null ? 'Mais perto de você' : currentNeighborhood ? `Em ${currentNeighborhood} e arredores` : 'Em toda Ribeirão Preto';
+      $('results-count').textContent = `${totalStores} ${totalStores === 1 ? 'loja' : 'lojas'}`;
+      $('fab-map-label').textContent = `Mapa · ${storesData.filter(coordsOf).length}`;
+      $('map-title').textContent = label ? `${label} · ${totalStores} lojas` : `${totalStores} lojas em Ribeirão`;
 
-      const safeName = (store.name || '').replace(/'/g, "\\'");
+      const chips = [];
+      const chip = (icon, text, action) => `
+        <button onclick="${action}" class="shrink-0 h-8 pl-3 pr-2.5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center gap-1.5">
+          <i class="fa-solid ${icon} text-[10px]"></i>${esc(text)}<i class="fa-solid fa-xmark text-[10px] opacity-80 ml-0.5"></i></button>`;
+      if (label) chips.push(chip('fa-magnifying-glass', label, 'clearSearch()'));
+      if (currentNeighborhood) chips.push(chip('fa-house-chimney', currentNeighborhood, 'selectNeighborhood(-1)'));
+      if (userLat !== null) chips.push(chip('fa-location-crosshairs', 'Perto de mim', 'toggleNearMe()'));
+      $('active-filters').innerHTML = chips.join('');
+      $('active-filters').classList.toggle('hidden', !chips.length);
+    }
 
-      // Badges de topo (Patrocinada, Catálogo, Proximidade)
-      let badgesHtml = '<div class="flex items-center gap-1.5 flex-wrap">';
-      if (store.is_sponsored === 1) {
-        badgesHtml += `
-          <span class="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-            <i class="fa-solid fa-star text-amber-500"></i> Destaque Local
-          </span>
-        `;
-      }
-      if (store.proximity_badge) {
-        const isLocalMatch = store.in_selected_neighborhood && currentNeighborhood;
-        const proxClass = isLocalMatch
-          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-          : "bg-blue-50 text-blue-700 border-blue-200";
-        badgesHtml += `
-          <span class="inline-flex items-center gap-1 ${proxClass} border text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-            ${store.proximity_badge}
-          </span>
-        `;
-      }
-      if (store.has_catalog === 1) {
-        badgesHtml += `
-          <span class="inline-flex items-center gap-1 bg-slate-100 text-slate-600 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-            <i class="fa-solid fa-boxes-stacked text-slate-400"></i> +${store.product_count} itens
-          </span>
-        `;
-      }
-      badgesHtml += '</div>';
-
-      // Evidências de Match da Busca (Por que esta loja apareceu)
-      let matchReasonsHtml = '';
-      if (currentQuery && store.match_reasons && store.match_reasons.length > 0) {
-        matchReasonsHtml = `
-          <div class="flex items-center gap-1.5 flex-wrap mt-2">
-            ${store.match_reasons.map(r => `
-              <span class="inline-flex items-center gap-1 bg-emerald-50/90 text-emerald-800 border border-emerald-200 text-[11px] font-semibold px-2.5 py-0.5 rounded-lg">
-                <i class="fa-solid fa-check text-emerald-600 text-[10px]"></i> ${r}
-              </span>
-            `).join('')}
+    function emptyStateHTML() {
+      const sugg = ['bateria', 'tinta', 'chaveiro', 'pneu', 'ração', 'celular'];
+      return `
+        <div class="text-center bg-white rounded-3xl p-8 ring-1 ring-slate-200 fade-up">
+          <div class="w-16 h-16 mx-auto rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center text-2xl"><i class="fa-solid fa-store-slash"></i></div>
+          <p class="font-extrabold text-slate-900 mt-4">Nada encontrado por aqui</p>
+          <p class="text-sm text-slate-500 mt-1">Tente outra palavra ou o nome do setor.</p>
+          <div class="flex flex-wrap justify-center gap-2 mt-4">
+            ${sugg.map(s => `<button onclick="$('search-input').value='${s}'; activeCategory=null; renderCategories(); syncClearBtn(); executeSearch()" class="h-9 px-3.5 rounded-full bg-slate-100 text-sm font-semibold text-slate-700">${s}</button>`).join('')}
           </div>
-        `;
-      }
+          ${currentNeighborhood ? `<button onclick="selectNeighborhood(-1)" class="mt-5 h-11 px-5 rounded-xl bg-blue-600 text-white font-bold text-sm">Buscar em toda Ribeirão</button>` : ''}
+        </div>`;
+    }
 
-      // Marcas
-      let brandsHtml = '';
-      if (store.brands_list && store.brands_list.length > 0) {
-        brandsHtml = `
-          <div class="flex items-center gap-1.5 flex-wrap mt-2.5 text-[11px]">
-            <span class="text-slate-400 font-semibold">Marcas trabalhadas:</span>
-            ${store.brands_list.slice(0, 6).map(b => `<span class="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded-md">${b}</span>`).join('')}
-          </div>
-        `;
-      }
+    function avatarHTML(s, idx, size) {
+      const color = AVATAR_COLORS[hashIdx(s.macro_category || s.category, AVATAR_COLORS.length)];
+      return `
+        <div class="relative shrink-0">
+          <div class="${size} rounded-2xl bg-gradient-to-br ${color} text-white font-extrabold flex items-center justify-center shadow-sm">${esc(initials(s.name))}</div>
+          ${idx !== null && coordsOf(s) ? `<span class="absolute -top-1.5 -left-1.5 min-w-[20px] h-5 px-1 rounded-full bg-white ring-1 ring-slate-200 text-[10px] font-extrabold text-slate-700 flex items-center justify-center">${idx + 1}</span>` : ''}
+        </div>`;
+    }
 
-      // Amostras de produtos (priorizando itens que bateram direto com a busca!)
-      let samplesHtml = '';
-      if (store.sample_products && store.sample_products.length > 0) {
-        const hasDirectMatch = store.sample_products.some(p => p.is_direct_match);
-        const sectionTitle = hasDirectMatch 
-          ? '<i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i> Itens relacionados à sua busca nesta loja:'
-          : 'Exemplos de produtos da loja:';
-        samplesHtml = `
-          <div class="mt-3 pt-3 border-t border-slate-100">
-            <div class="text-[11px] font-bold text-slate-500 mb-2">${sectionTitle}</div>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              ${store.sample_products.slice(0, 3).map(p => `
-                <a href="${p.url}" target="_blank" onclick="trackLead('${store.id}', '${safeName}', 'product_sample')" class="bg-slate-50 hover:bg-slate-100 border ${p.is_direct_match ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200'} p-2 rounded-xl flex sm:block items-center gap-2.5 transition-colors group/item">
-                  ${p.image ? `<img src="${p.image}" class="w-12 h-12 sm:w-full sm:h-14 object-contain rounded-lg sm:mb-1.5 bg-white shrink-0" loading="lazy" />` : ''}
-                  <div class="min-w-0 flex-1">
-                    <div class="text-[11px] font-semibold text-slate-800 line-clamp-1 group-hover/item:text-blue-600">${p.title}</div>
-                    ${p.price ? `<div class="text-xs font-black text-emerald-600 mt-0.5">R$ ${Number(p.price).toFixed(2)}</div>` : ''}
-                  </div>
-                </a>
-              `).join('')}
+    function productsStripHTML(products, idx) {
+      if (!products.length) return '';
+      return `
+        <div class="flex gap-2 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1" onclick="event.stopPropagation()">
+          ${products.map(p => `
+            <a href="${esc(p.url)}" target="_blank" rel="noopener" onclick="trackIdx(${idx},'product_sample')"
+               class="shrink-0 w-36 rounded-2xl ring-1 ${p.is_direct_match ? 'ring-emerald-300 bg-emerald-50/60' : 'ring-slate-200 bg-slate-50'} p-2">
+              ${p.image ? `<img src="${esc(p.image)}" loading="lazy" class="w-full h-20 object-contain rounded-xl bg-white" onerror="this.remove()">` : ''}
+              <p class="text-[11.5px] font-semibold text-slate-700 line-clamp-2 mt-1.5 leading-snug">${esc(p.title)}</p>
+              ${p.price ? `<p class="text-[13px] font-extrabold text-emerald-600 mt-0.5">R$ ${Number(p.price).toFixed(2).replace('.', ',')}</p>` : ''}
+            </a>`).join('')}
+        </div>`;
+    }
+
+    // Card da loja na lista
+    function storeCardHTML(s, idx) {
+      const sponsored = Number(s.is_sponsored) === 1;
+      const cat = s.subcategory || s.macro_category || s.category || 'Comércio local';
+      const macro = s.macro_category && s.macro_category !== cat ? s.macro_category : '';
+      const reasons = (currentQuery || activeCategory) ? (s.match_reasons || []).slice(0, 2) : [];
+      const brands = (s.brands_list || []).slice(0, 5);
+      const direct = (s.sample_products || []).filter(p => p.is_direct_match);
+      const tel = telUrl(s), wa = s.whatsapp_url;
+      const inNeigh = currentNeighborhood && s.in_selected_neighborhood;
+      return `
+        <article id="card-${idx}" onclick="openStore(${idx})" onmouseenter="hoverStore(${idx})"
+                 class="store-card fade-up bg-white rounded-3xl p-4 ring-1 ${sponsored ? 'ring-amber-300' : 'ring-slate-200/80'} shadow-[0_2px_12px_-6px_rgba(15,23,42,.12)] cursor-pointer">
+          <div class="flex gap-3">
+            ${avatarHTML(s, idx, 'w-12 h-12 text-[15px]')}
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 flex-wrap mb-1">
+                ${sponsored ? `<span class="text-[10px] font-extrabold uppercase tracking-wide text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md"><i class="fa-solid fa-star mr-0.5"></i>Destaque</span>` : ''}
+                <span class="text-[11px] font-bold ${inNeigh || s.distance_km !== null && s.distance_km !== undefined ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 bg-slate-100'} px-2 py-0.5 rounded-md">
+                  <i class="fa-solid ${s.distance_km !== null && s.distance_km !== undefined ? 'fa-person-walking' : 'fa-location-dot'} mr-0.5"></i>${esc(distLabel(s))}
+                </span>
+                ${Number(s.has_catalog) === 1 ? `<span class="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">${s.product_count}+ itens</span>` : ''}
+              </div>
+              <h3 class="font-extrabold text-[15.5px] leading-snug text-slate-900 line-clamp-2">${esc(s.name)}</h3>
+              <p class="text-[12.5px] text-slate-500 font-medium truncate">${esc(cat)}${macro ? ` · ${esc(macro)}` : ''}</p>
             </div>
           </div>
-        `;
-      }
+          ${reasons.length ? `<div class="flex flex-wrap gap-1.5 mt-3">${reasons.map(r => `
+            <span class="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-1 rounded-lg"><i class="fa-solid fa-circle-check text-emerald-500 text-[10px]"></i>${esc(r)}</span>`).join('')}</div>` : ''}
+          ${s.ai_summary ? `<p class="text-[13px] text-slate-600 leading-relaxed mt-2.5 line-clamp-2">${esc(s.ai_summary)}</p>` : ''}
+          ${brands.length ? `<div class="flex gap-1.5 mt-2.5 overflow-x-auto no-scrollbar">${brands.map(b => `<span class="shrink-0 text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">${esc(b)}</span>`).join('')}</div>` : ''}
+          ${productsStripHTML(direct, idx)}
+          <div class="flex gap-2 mt-3.5" onclick="event.stopPropagation()">
+            ${wa ? `<a href="${esc(wa)}" target="_blank" rel="noopener" onclick="trackIdx(${idx},'whatsapp')"
+                     class="flex-1 h-11 rounded-xl bg-emerald-500 active:bg-emerald-600 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-500/25">
+                     <i class="fa-brands fa-whatsapp text-lg"></i>WhatsApp</a>` : ''}
+            ${tel ? `<a href="${tel}" onclick="trackIdx(${idx},'call')" aria-label="Ligar"
+                     class="${wa ? 'w-11' : 'flex-1'} h-11 rounded-xl bg-slate-100 active:bg-slate-200 text-slate-700 font-bold text-sm flex items-center justify-center gap-2">
+                     <i class="fa-solid fa-phone"></i>${wa ? '' : 'Ligar'}</a>` : ''}
+            <a href="${routeUrl(s)}" target="_blank" rel="noopener" onclick="trackIdx(${idx},'gps')" aria-label="Como chegar"
+               class="${wa || tel ? 'w-11' : 'flex-1'} h-11 rounded-xl bg-blue-50 active:bg-blue-100 text-blue-600 font-bold text-sm flex items-center justify-center gap-2">
+               <i class="fa-solid fa-diamond-turn-right"></i>${wa || tel ? '' : 'Como chegar'}</a>
+          </div>
+        </article>`;
+    }
 
-      const hasCoords = store.latitude && store.longitude;
-      const gmapsRouteUrl = hasCoords 
-        ? `https://www.google.com/maps/dir/?api=1&destination=${store.latitude},${store.longitude}`
-        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(store.name + ' ' + (store.address || 'Ribeirão Preto'))}`;
+    // Rolagem infinita
+    new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !isLoading && storesData.length && storesData.length < totalStores) executeSearch(true);
+    }, { rootMargin: '700px' }).observe($('list-sentinel'));
 
-      card.innerHTML = `
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            ${badgesHtml}
-            <h3 class="text-base sm:text-lg font-black text-slate-900 mt-1.5 group-hover:text-blue-600 transition-colors">
-              ${store.name}
-            </h3>
-            <div class="flex items-center gap-1.5 text-xs text-slate-500 font-semibold mt-0.5">
-              <span>${store.macro_category || 'Comércio Local'}</span>
-              ${store.subcategory && store.subcategory !== store.macro_category ? `<span>&rarr;</span><span class="text-blue-600 font-bold">${store.subcategory}</span>` : ''}
+    // -------------------------------------------------------------------------
+    // DETALHE DA LOJA (bottom sheet)
+    // -------------------------------------------------------------------------
+    function openStore(idx) {
+      const s = storesData[idx];
+      if (!s) return;
+      vibrate();
+      renderStoreSheet(s, idx);
+      $('store-layer').querySelector('.panel').scrollTop = 0;
+      openLayer('store-layer');
+    }
+
+    function renderStoreSheet(s, idx) {
+      const tel = telUrl(s), wa = s.whatsapp_url;
+      const specialties = String(s.specialties || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 8);
+      const brands = (s.brands_list || []);
+      const reasons = (s.match_reasons || []);
+      const products = s.sample_products || [];
+      const action = (href, icon, label, cls, track, extra = '') => `
+        <a ${href ? `href="${href}"` : ''} ${extra} onclick="${track}" class="flex flex-col items-center justify-center gap-1.5 h-[74px] rounded-2xl ${cls} font-bold text-[12px] active:scale-95 transition">
+          <i class="${icon} text-xl"></i>${label}</a>`;
+
+      $('store-sheet').innerHTML = `
+        <div class="sticky top-0 z-10 bg-white/95 backdrop-blur pt-2.5 pb-2 px-5">
+          <div class="mx-auto w-10 h-1.5 rounded-full bg-slate-200 md:hidden"></div>
+          <div class="flex justify-end -mb-6 mt-1"><button onclick="closeTopLayer()" class="w-9 h-9 rounded-full bg-slate-100 text-slate-500" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button></div>
+        </div>
+        <div class="px-5 pb-6">
+          <div class="flex gap-3.5 items-start pr-10">
+            ${avatarHTML(s, null, 'w-16 h-16 text-xl')}
+            <div class="min-w-0">
+              <h3 class="text-xl font-extrabold text-slate-900 leading-tight">${esc(s.name)}</h3>
+              <p class="text-[13px] text-blue-600 font-bold mt-0.5">${esc(s.subcategory || s.macro_category || 'Comércio local')}</p>
+              <p class="text-[12.5px] text-slate-500 font-semibold mt-0.5"><i class="fa-solid fa-location-dot mr-1"></i>${esc(s.neighborhood || 'Ribeirão Preto')}${s.distance_km !== null && s.distance_km !== undefined ? ` · ${esc(distLabel(s))}` : ''}</p>
             </div>
           </div>
 
-          ${hasCoords ? `
-            <button onclick="focusStoreOnMap(${store.latitude}, ${store.longitude}, '${store.id}')" class="shrink-0 px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 border border-slate-200 transition-colors flex items-center gap-1.5 text-xs font-bold" title="Localizar pino no Mapa">
-              <i class="fa-solid fa-map-pin text-blue-600"></i>
-              <span class="hidden sm:inline">Ver no Mapa</span>
+          <div class="grid grid-cols-4 gap-2 mt-5">
+            ${wa ? action(esc(wa), 'fa-brands fa-whatsapp', 'WhatsApp', 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30', `trackIdx(${idx},'whatsapp')`, 'target="_blank" rel="noopener"')
+                 : action('', 'fa-brands fa-whatsapp', 'WhatsApp', 'bg-slate-100 text-slate-300', '')}
+            ${tel ? action(tel, 'fa-solid fa-phone', 'Ligar', 'bg-slate-100 text-slate-700', `trackIdx(${idx},'call')`)
+                  : action('', 'fa-solid fa-phone', 'Ligar', 'bg-slate-100 text-slate-300', '')}
+            ${action(routeUrl(s), 'fa-solid fa-diamond-turn-right', 'Rota', 'bg-blue-50 text-blue-600', `trackIdx(${idx},'gps')`, 'target="_blank" rel="noopener"')}
+            ${action('', 'fa-solid fa-share-nodes', 'Enviar', 'bg-slate-100 text-slate-700 cursor-pointer', `shareStore(${idx})`)}
+          </div>
+
+          ${reasons.length && (currentQuery || activeCategory) ? `
+            <div class="mt-5 p-3.5 rounded-2xl bg-emerald-50">
+              <p class="text-[11px] font-extrabold uppercase tracking-wider text-emerald-700 mb-1.5">Por que indicamos</p>
+              ${reasons.map(r => `<p class="text-[13px] font-semibold text-emerald-900 flex gap-2 py-0.5"><i class="fa-solid fa-circle-check text-emerald-500 mt-0.5"></i>${esc(r)}</p>`).join('')}
+            </div>` : ''}
+
+          ${s.ai_summary ? `
+            <div class="mt-5">
+              <p class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">Sobre a loja</p>
+              <p class="text-[14px] text-slate-700 leading-relaxed">${esc(s.ai_summary)}</p>
+            </div>` : ''}
+
+          ${specialties.length ? `
+            <div class="mt-5">
+              <p class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Especialidades</p>
+              <div class="flex flex-wrap gap-1.5">${specialties.map(x => `<span class="text-[12.5px] font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">${esc(x)}</span>`).join('')}</div>
+            </div>` : ''}
+
+          ${brands.length ? `
+            <div class="mt-5">
+              <p class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Marcas trabalhadas</p>
+              <div class="flex flex-wrap gap-1.5">${brands.map(b => `<span class="text-[12.5px] font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg">${esc(b)}</span>`).join('')}</div>
+            </div>` : ''}
+
+          ${products.length ? `
+            <div class="mt-5">
+              <p class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Produtos de referência</p>
+              ${productsStripHTML(products, idx)}
+            </div>` : ''}
+
+          <div class="mt-5 rounded-2xl ring-1 ring-slate-200 divide-y divide-slate-100">
+            <button onclick="copyText(${idx})" class="w-full flex items-center gap-3 p-3.5 text-left">
+              <i class="fa-solid fa-map-location-dot text-slate-400 w-5 text-center"></i>
+              <span class="flex-1 text-[13.5px] text-slate-700 font-medium">${esc(s.address || 'Ribeirão Preto - SP')}</span>
+              <i class="fa-regular fa-copy text-slate-400"></i>
             </button>
-          ` : ''}
-        </div>
-
-        ${matchReasonsHtml}
-
-        <!-- RESUMO DA INTELIGÊNCIA LOCAL -->
-        <p class="text-xs text-slate-600 mt-2.5 leading-relaxed bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-          ${store.ai_summary}
-        </p>
-
-        <!-- MARCAS VENDIDAS -->
-        ${brandsHtml}
-
-        <!-- AMOSTRAS DE ESTOQUE -->
-        ${samplesHtml}
-
-        <!-- ENDEREÇO E BOTÕES DE AÇÃO -->
-        <div class="mt-3.5 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div class="text-slate-500">
-            <div class="line-clamp-1"><i class="fa-solid fa-location-dot mr-1 text-slate-400"></i> ${store.address}</div>
-            <div class="font-bold text-slate-700 mt-0.5"><i class="fa-solid fa-phone mr-1 text-slate-400"></i> ${store.phone_display}</div>
+            ${s.phone_display ? `<div class="flex items-center gap-3 p-3.5"><i class="fa-solid fa-phone text-slate-400 w-5 text-center"></i><span class="text-[13.5px] text-slate-700 font-semibold">${esc(s.phone_display)}</span></div>` : ''}
+            ${s.website ? `<a href="${esc(s.website)}" target="_blank" rel="noopener" onclick="trackIdx(${idx},'website')" class="flex items-center gap-3 p-3.5">
+              <i class="fa-solid fa-globe text-slate-400 w-5 text-center"></i><span class="flex-1 text-[13.5px] text-blue-600 font-semibold truncate">${esc(s.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))}</span>
+              <i class="fa-solid fa-arrow-up-right-from-square text-slate-400 text-xs"></i></a>` : ''}
           </div>
 
-          <div class="flex items-center gap-2 shrink-0 flex-wrap">
-            <!-- ROTA GPS GOOGLE MAPS -->
-            <a href="${gmapsRouteUrl}" target="_blank" onclick="trackLead('${store.id}', '${safeName}', 'gps')" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors flex items-center gap-1.5" title="Abrir GPS no Google Maps / Waze">
-              <i class="fa-solid fa-diamond-turn-right text-blue-600"></i>
-              <span>Como Chegar</span>
-            </a>
+          ${coordsOf(s) ? `<button onclick="showOnMap(${idx})" class="mt-4 w-full h-12 rounded-2xl ring-1 ring-slate-200 font-bold text-sm text-slate-700 flex items-center justify-center gap-2 active:bg-slate-50">
+            <i class="fa-solid fa-map text-blue-600"></i> Ver no mapa</button>` : ''}
 
-            ${store.website ? `
-              <a href="${store.website}" target="_blank" onclick="trackLead('${store.id}', '${safeName}', 'website')" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors" title="Visitar Site da Loja">
-                <i class="fa-solid fa-globe"></i>
-              </a>
-            ` : ''}
-            
-            ${store.whatsapp_url ? `
-              <a href="${store.whatsapp_url}" target="_blank" onclick="trackLead('${store.id}', '${safeName}', 'whatsapp')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition-all flex items-center gap-1.5 active:scale-95">
-                <i class="fa-brands fa-whatsapp text-sm"></i>
-                <span>WhatsApp</span>
-              </a>
-            ` : ''}
-          </div>
-        </div>
-      `;
-
-      return card;
+          <p class="text-[11px] text-slate-400 text-center mt-4">Informações organizadas a partir do site da loja. Confirme preço e estoque pelo WhatsApp.</p>
+        </div>`;
     }
 
-    function setSearchTerm(term) {
-      document.getElementById('search-input').value = term;
-      toggleClearBtn();
-      executeSearch();
+    async function shareStore(idx) {
+      const s = storesData[idx];
+      const url = routeUrl(s);
+      const text = `${s.name}\n${s.address || ''}\nAchei no CompraRibeirão`;
+      trackIdx(idx, 'share');
+      if (navigator.share) { try { await navigator.share({ title: s.name, text, url }); } catch (e) {} }
+      else { try { await navigator.clipboard.writeText(`${text}\n${url}`); toast('Link copiado ✓'); } catch (e) {} }
+    }
+    async function copyText(idx) {
+      try { await navigator.clipboard.writeText(storesData[idx].address || ''); toast('Endereço copiado ✓'); } catch (e) {}
     }
 
-    function resetFilters() {
-      document.getElementById('search-input').value = '';
-      document.getElementById('filter-neighborhood').value = '';
-      toggleClearBtn();
-      executeSearch();
+    // -------------------------------------------------------------------------
+    // MAPAS (Leaflet + OpenStreetMap, sem chave de API)
+    // -------------------------------------------------------------------------
+    function makeMap(elId) {
+      const m = L.map(elId, { zoomControl: false, attributionControl: true }).setView(CITY_CENTER, 12);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(m);
+      if (window.innerWidth >= 1024) L.control.zoom({ position: 'bottomright' }).addTo(m);
+      return m;
     }
-
-    function loadMore() {
-      currentOffset += limit;
-      executeSearch(true);
+    function pinIcon(num, sponsored, active) {
+      return L.divIcon({ className: 'pin-wrap', html: `<div class="pin ${sponsored ? 'sponsored' : ''} ${active ? 'active' : ''}"><span>${num}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 36] });
     }
-
-    function setViewMode(mode) {
-      const colStores = document.getElementById('col-stores');
-      const colMap = document.getElementById('col-map');
-      
-      const btnSplit = document.getElementById('view-split');
-      const btnList = document.getElementById('view-list');
-      const btnMap = document.getElementById('view-map');
-
-      [btnSplit, btnList, btnMap].forEach(btn => {
-        btn.className = "px-3 py-1.5 rounded-lg hover:bg-slate-100 flex items-center gap-1.5 transition-colors";
+    function renderMarkers(layer, registry, onClick) {
+      layer.clearLayers();
+      Object.keys(registry).forEach(k => delete registry[k]);
+      storesData.forEach((s, idx) => {
+        const c = coordsOf(s);
+        if (!c) return;
+        const m = L.marker(c, { icon: pinIcon(idx + 1, Number(s.is_sponsored) === 1, false) }).addTo(layer);
+        m.on('click', () => onClick(idx));
+        registry[idx] = m;
       });
-
-      if (mode === 'split') {
-        btnSplit.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors";
-        colStores.className = "lg:col-span-7 space-y-4 block";
-        colMap.className = "lg:col-span-5 sticky top-20 block";
-      } else if (mode === 'list') {
-        btnList.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors";
-        colStores.className = "lg:col-span-12 space-y-4 block";
-        colMap.className = "hidden";
-      } else if (mode === 'map') {
-        btnMap.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white flex items-center gap-1.5 transition-colors";
-        colStores.className = "hidden";
-        colMap.className = "lg:col-span-12 relative block";
-      }
-
-      if (leafletMap) {
-        setTimeout(() => leafletMap.invalidateSize(), 200);
-      }
     }
-
-    async function toggleModalLojista() {
-      const modal = document.getElementById('modal-lojista');
-      modal.classList.toggle('hidden');
-      if (!modal.classList.contains('hidden')) {
-        try {
-          const res = await fetch('/api/leads-report');
-          const data = await res.json();
-          const totalClicks = (data.top_stores || []).reduce((acc, s) => acc + s.total_clicks, 0);
-          if (totalClicks > 0) {
-            document.getElementById('leads-stats-box').classList.remove('hidden');
-            document.getElementById('leads-stats-text').innerText = `${totalClicks} conexões diretas (WhatsApp / GPS) geradas para lojistas de Ribeirão Preto.`;
-          }
-        } catch (e) {}
+    function setActivePin(registry, prevIdx, idx) {
+      if (prevIdx !== null && registry[prevIdx]) {
+        const ps = storesData[prevIdx];
+        registry[prevIdx].setIcon(pinIcon(prevIdx + 1, ps && Number(ps.is_sponsored) === 1, false)).setZIndexOffset(0);
       }
+      if (idx !== null && registry[idx]) registry[idx].setIcon(pinIcon(idx + 1, Number(storesData[idx].is_sponsored) === 1, true)).setZIndexOffset(1000);
+      return idx;
     }
-
-    // =========================================================================
-    // CONTROLE DO PAINEL DE MANUTENÇÃO LOCAL (/api/admin/*)
-    // =========================================================================
-    let adminPollTimer = null;
-
-    function toggleModalAdmin() {
-      const modal = document.getElementById('modal-admin');
-      modal.classList.toggle('hidden');
-      if (!modal.classList.contains('hidden')) {
-        loadAdminStatus();
-      } else if (adminPollTimer) {
-        clearInterval(adminPollTimer);
-        adminPollTimer = null;
-      }
+    function boundsOf() {
+      const pts = storesData.map(coordsOf).filter(Boolean);
+      if (userLat !== null) pts.push([userLat, userLng]);
+      return pts.length ? L.latLngBounds(pts) : null;
     }
-
-    async function loadAdminStatus() {
-      try {
-        const res = await fetch('/api/admin/status');
-        const data = await res.json();
-        const d = data.diagnostics || {};
-        const job = data.job || {};
-
-        // Badge de Ambiente (PC Local vs Nuvem)
-        const envBadge = document.getElementById('admin-env-badge');
-        const cloudWarn = document.getElementById('admin-cloud-warning');
-        if (data.is_local_pc) {
-          envBadge.innerText = 'PC Local (Operacional)';
-          envBadge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
-          cloudWarn.classList.add('hidden');
-        } else {
-          envBadge.innerText = 'Nuvem Render (Leitura)';
-          envBadge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30';
-          cloudWarn.classList.remove('hidden');
-        }
-
-        // Indicadores Numéricos
-        document.getElementById('diag-stores').innerText = `${d.stores_count || 0} lojas`;
-        document.getElementById('diag-discovered').innerText = `${d.discovered_count || 0} avistadas no Maps`;
-        document.getElementById('diag-texts').innerText = `${d.web_text_success || 0} sites (${d.web_text_pending || 0} pend.)`;
-        document.getElementById('diag-products').innerText = `${(d.raw_products_count || 0).toLocaleString('pt-BR')} produtos unitários`;
-        document.getElementById('diag-ai').innerText = `${d.ai_enriched_count || 0} lojas (${d.ai_pending_count || 0} fila)`;
-        document.getElementById('diag-ollama').innerText = d.ollama_online
-          ? `🟢 Ollama (${d.ollama_model}) Online`
-          : `⚪ Ollama (${d.ollama_model}) Auto-Start`;
-        document.getElementById('diag-public-size').innerText = `${d.public_db_size_mb || 0} MB`;
-        document.getElementById('diag-public-info').innerText = `${d.public_stores_count || 0} lojas • ${d.public_leads_count || 0} leads`;
-
-        // Console de Execução em Tempo Real
-        const dot = document.getElementById('admin-job-dot');
-        const statusTxt = document.getElementById('admin-job-status');
-        const stopBtn = document.getElementById('btn-stop-job');
-        const logPre = document.getElementById('admin-log-output');
-
-        if (job.logs && job.logs.length > 0) {
-          logPre.innerText = job.logs.join('\n');
-          logPre.scrollTop = logPre.scrollHeight;
-        }
-
-        if (job.running) {
-          dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping';
-          statusTxt.innerText = `Executando etapa '${job.step}' (iniciada às ${job.started_at})...`;
-          stopBtn.classList.remove('hidden');
-          if (!adminPollTimer) {
-            adminPollTimer = setInterval(loadAdminStatus, 1500);
-          }
-        } else {
-          dot.className = job.exit_code === 0 ? 'w-2.5 h-2.5 rounded-full bg-emerald-400' : 'w-2.5 h-2.5 rounded-full bg-slate-500';
-          statusTxt.innerText = job.step
-            ? `Última etapa: '${job.step}' finalizada às ${job.finished_at || ''} (código ${job.exit_code})`
-            : 'Console de Execução (Pronto)';
-          stopBtn.classList.add('hidden');
-          if (adminPollTimer) {
-            clearInterval(adminPollTimer);
-            adminPollTimer = null;
-            // Atualiza contadores e busca da página principal após término de uma etapa
-            loadStats();
-            loadNeighborhoods();
-            executeSearch();
-          }
-        }
-      } catch (e) {
-        console.error('Erro ao carregar status do painel:', e);
-      }
+    function addUserMarker(map) {
+      if (userLat === null || !map) return;
+      userMarkers.push(L.marker([userLat, userLng], { interactive: false, icon: L.divIcon({ className: 'pin-wrap', html: '<div class="user-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(map));
     }
+    function clearUserMarkers() { userMarkers.forEach(m => m.remove()); userMarkers = []; }
 
-    async function runAdminStep(step, force = false) {
-      const queryInput = document.getElementById('admin-discover-query');
-      const queryVal = queryInput ? queryInput.value.trim() : '';
+    // Mapa fixo do desktop
+    function ensureInlineMap() {
+      if (inlineMap || window.innerWidth < 1024) return;
+      inlineMap = makeMap('inline-map');
+      inlineLayer = L.layerGroup().addTo(inlineMap);
+    }
+    function fitInline() { const b = boundsOf(); if (inlineMap && b) inlineMap.fitBounds(b, { padding: [30, 30], maxZoom: 15 }); }
+    function hoverStore(idx) { if (inlineMap) inlineActive = setActivePin(inlineMarkers, inlineActive, idx); }
 
-      let msgVal = 'Atualizacao do catalogo inteligente via Painel de Controle';
-      if (step === 'deploy') {
-        const userMsg = prompt('Digite uma descrição para esta atualização na nuvem (ou clique OK para padrão):', msgVal);
-        if (userMsg === null) return;
-        if (userMsg.trim()) msgVal = userMsg.trim();
-      }
-
-      try {
-        const res = await fetch('/api/admin/run-step', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            step: step,
-            query: step === 'discover' ? queryVal : null,
-            force: force,
-            msg: msgVal
-          })
+    function updateAllMarkers() {
+      clearUserMarkers();
+      ensureInlineMap();
+      if (inlineMap) {
+        inlineActive = null;
+        renderMarkers(inlineLayer, inlineMarkers, (idx) => {
+          inlineActive = setActivePin(inlineMarkers, inlineActive, idx);
+          const card = $('card-' + idx);
+          if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.classList.add('highlight'); setTimeout(() => card.classList.remove('highlight'), 1600); }
         });
-        const data = await res.json();
-        if (!res.ok) {
-          alert(data.detail || 'Não foi possível iniciar a etapa.');
-          return;
+        addUserMarker(inlineMap);
+        fitInline();
+      }
+      if (overlayMap) { renderOverlay(); }
+    }
+
+    // Mapa em tela cheia (celular e desktop) com carrossel sincronizado
+    function openMap(focusIdx = null, viaSwap = false) {
+      if (viaSwap) swapLayer('store-layer', 'map-layer'); else openLayer('map-layer');
+      setTimeout(() => {
+        if (!overlayMap) { overlayMap = makeMap('overlay-map'); overlayLayer = L.layerGroup().addTo(overlayMap); }
+        overlayMap.invalidateSize();
+        renderOverlay();
+        if (focusIdx !== null && coordsOf(storesData[focusIdx])) {
+          overlayMap.setView(coordsOf(storesData[focusIdx]), 16);
+          activateCarousel(focusIdx, true);
+        } else {
+          fitOverlay();
         }
-        await loadAdminStatus();
-        if (!adminPollTimer) {
-          adminPollTimer = setInterval(loadAdminStatus, 1500);
+      }, 60);
+    }
+    function fitOverlay() {
+      const b = boundsOf();
+      if (overlayMap && b) overlayMap.fitBounds(b, { paddingTopLeft: [30, 90], paddingBottomRight: [30, 190], maxZoom: 15 });
+    }
+    function renderOverlay() {
+      overlayActive = null;
+      renderMarkers(overlayLayer, overlayMarkers, (idx) => activateCarousel(idx, true));
+      addUserMarker(overlayMap);
+      const items = storesData.map((s, idx) => ({ s, idx })).filter(x => coordsOf(x.s));
+      const car = $('map-carousel');
+      car.innerHTML = items.length ? items.map(({ s, idx }) => `
+        <div data-idx="${idx}" onclick="openStore(${idx})" class="carousel-card snap-center shrink-0 w-[86vw] max-w-[360px] bg-white rounded-3xl shadow-2xl shadow-slate-900/20 p-3.5 flex items-center gap-3 cursor-pointer">
+          ${avatarHTML(s, idx, 'w-12 h-12 text-[15px]')}
+          <div class="min-w-0 flex-1">
+            <p class="font-extrabold text-[14.5px] text-slate-900 truncate">${esc(s.name)}</p>
+            <p class="text-[12px] text-slate-500 font-medium truncate">${esc(s.subcategory || s.macro_category || '')}</p>
+            <p class="text-[12px] font-bold text-emerald-700 mt-0.5"><i class="fa-solid fa-location-dot mr-1"></i>${esc(distLabel(s))}</p>
+          </div>
+          <div class="flex flex-col gap-1.5 shrink-0" onclick="event.stopPropagation()">
+            ${s.whatsapp_url ? `<a href="${esc(s.whatsapp_url)}" target="_blank" rel="noopener" onclick="trackIdx(${idx},'whatsapp')" class="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/30" aria-label="WhatsApp"><i class="fa-brands fa-whatsapp text-lg"></i></a>` : ''}
+            <a href="${routeUrl(s)}" target="_blank" rel="noopener" onclick="trackIdx(${idx},'gps')" class="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center" aria-label="Rota"><i class="fa-solid fa-diamond-turn-right"></i></a>
+          </div>
+        </div>`).join('')
+        : `<div class="mx-auto bg-white rounded-2xl shadow-xl px-4 py-3 text-sm font-semibold text-slate-600">Nenhuma loja com localização nesta busca</div>`;
+
+      if (carouselObserver) carouselObserver.disconnect();
+      carouselObserver = new IntersectionObserver((entries) => {
+        if (programmaticScroll) return;
+        entries.forEach(e => {
+          if (e.isIntersecting && e.intersectionRatio > 0.7) {
+            const idx = Number(e.target.dataset.idx);
+            overlayActive = setActivePin(overlayMarkers, overlayActive, idx);
+            const c = coordsOf(storesData[idx]);
+            if (c) overlayMap.panTo(c, { animate: true });
+          }
+        });
+      }, { root: car, threshold: [0.7] });
+      car.querySelectorAll('.carousel-card').forEach(el => carouselObserver.observe(el));
+    }
+    function activateCarousel(idx, scrollCard) {
+      vibrate();
+      overlayActive = setActivePin(overlayMarkers, overlayActive, idx);
+      const c = coordsOf(storesData[idx]);
+      if (c && overlayMap) overlayMap.panTo(c, { animate: true });
+      if (scrollCard) {
+        const card = $('map-carousel').querySelector(`[data-idx="${idx}"]`);
+        if (card) {
+          programmaticScroll = true;
+          card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+          setTimeout(() => { programmaticScroll = false; }, 700);
         }
-      } catch (e) {
-        alert('Erro ao comunicar com o servidor local: ' + e.message);
+      }
+    }
+    function showOnMap(idx) {
+      if (layerStack.includes('map-layer')) {
+        closeTopLayer();
+        setTimeout(() => { overlayMap.setView(coordsOf(storesData[idx]), 16); activateCarousel(idx, true); }, 80);
+      } else {
+        openMap(idx, true);
       }
     }
 
-    async function stopAdminJob() {
+    function setFab(show) {
+      const f = $('fab-map');
+      f.classList.toggle('opacity-0', !show);
+      f.classList.toggle('translate-y-4', !show);
+      f.classList.toggle('pointer-events-none', !show);
+    }
+
+    // -------------------------------------------------------------------------
+    // NAVEGAÇÃO, LOJISTA E ESTATÍSTICAS
+    // -------------------------------------------------------------------------
+    function goHome() {
+      while (layerStack.length) closeTopLayer();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    async function openLojista() {
+      openLayer('lojista-layer');
       try {
-        await fetch('/api/admin/stop-job', { method: 'POST' });
-        await loadAdminStatus();
+        const data = await (await fetch('/api/leads-report')).json();
+        const total = (data.top_stores || []).reduce((a, s) => a + s.total_clicks, 0);
+        if (total > 0) {
+          $('leads-stats-box').classList.remove('hidden');
+          $('leads-stats-text').textContent = `${total} contatos (WhatsApp, ligações e rotas) já gerados para lojas de Ribeirão.`;
+        }
+      } catch (e) {}
+    }
+    async function loadStats() {
+      try {
+        const d = await (await fetch('/api/stats')).json();
+        $('stat-stores').textContent = d.stores_count;
+        $('stat-neigh').textContent = d.neighborhoods_count;
       } catch (e) {}
     }
 
+    // Header compacto quando a busca principal sai da tela
+    new IntersectionObserver((entries) => {
+      $('app-header').classList.toggle('scrolled', !entries[0].isIntersecting);
+    }, { rootMargin: '-56px 0px 0px 0px' }).observe($('search-form'));
+
+    window.addEventListener('resize', () => {
+      if (!inlineMap && window.innerWidth >= 1024) updateAllMarkers();
+    });
+
+    // =========================================================================
+    // PAINEL DE CONTROLE LOCAL (/api/admin/*)
+    // =========================================================================
+    let adminPollTimer = null;
+    function toggleModalAdmin() {
+      const modal = $('modal-admin');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) loadAdminStatus();
+      else if (adminPollTimer) { clearInterval(adminPollTimer); adminPollTimer = null; }
+    }
+    async function loadAdminStatus() {
+      try {
+        const data = await (await fetch('/api/admin/status')).json();
+        const d = data.diagnostics || {}, job = data.job || {};
+        const badge = $('admin-env-badge');
+        if (data.is_local_pc) { badge.textContent = 'PC local • operacional'; badge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300'; $('admin-cloud-warning').classList.add('hidden'); }
+        else { badge.textContent = 'Nuvem • leitura'; badge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300'; $('admin-cloud-warning').classList.remove('hidden'); }
+        $('diag-stores').textContent = `${d.stores_count || 0} lojas`;
+        $('diag-discovered').textContent = `${d.discovered_count || 0} no Maps`;
+        $('diag-texts').textContent = `${d.web_text_success || 0} (${d.web_text_pending || 0} pend.)`;
+        $('diag-products').textContent = `${(d.raw_products_count || 0).toLocaleString('pt-BR')} produtos`;
+        $('diag-ai').textContent = `${d.ai_enriched_count || 0} (${d.ai_pending_count || 0} fila)`;
+        $('diag-ollama').textContent = d.ollama_online ? `🟢 ${d.ollama_model} online` : `⚪ ${d.ollama_model || 'Ollama'} auto-start`;
+        $('diag-public-size').textContent = `${d.public_db_size_mb || 0} MB`;
+        $('diag-public-info').textContent = `${d.public_stores_count || 0} lojas • ${d.public_leads_count || 0} leads`;
+
+        const log = $('admin-log-output');
+        if (job.logs && job.logs.length) { log.textContent = job.logs.join('\n'); log.scrollTop = log.scrollHeight; }
+        if (job.running) {
+          $('admin-job-dot').className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0';
+          $('admin-job-status').textContent = `Executando '${job.step}' (desde ${job.started_at})...`;
+          $('btn-stop-job').classList.remove('hidden');
+          if (!adminPollTimer) adminPollTimer = setInterval(loadAdminStatus, 1500);
+        } else {
+          $('admin-job-dot').className = `w-2.5 h-2.5 rounded-full shrink-0 ${job.exit_code === 0 ? 'bg-emerald-400' : 'bg-slate-500'}`;
+          $('admin-job-status').textContent = job.step ? `Última: '${job.step}' às ${job.finished_at || ''} (código ${job.exit_code})` : 'Console (pronto)';
+          $('btn-stop-job').classList.add('hidden');
+          if (adminPollTimer) { clearInterval(adminPollTimer); adminPollTimer = null; loadStats(); loadNeighborhoods(); executeSearch(); }
+        }
+      } catch (e) { console.error('Painel:', e); }
+    }
+    async function runAdminStep(step, force = false) {
+      const q = $('admin-discover-query').value.trim();
+      let msg = 'Atualizacao do catalogo inteligente via Painel de Controle';
+      if (step === 'deploy') { const m = prompt('Descrição da atualização na nuvem:', msg); if (m === null) return; if (m.trim()) msg = m.trim(); }
+      try {
+        const res = await fetch('/api/admin/run-step', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ step, query: step === 'discover' ? q : null, force, msg }) });
+        const data = await res.json();
+        if (!res.ok) { toast(data.detail || 'Não foi possível iniciar a etapa.', 4000); return; }
+        await loadAdminStatus();
+        if (!adminPollTimer) adminPollTimer = setInterval(loadAdminStatus, 1500);
+      } catch (e) { toast('Erro ao falar com o servidor local'); }
+    }
+    async function stopAdminJob() { try { await fetch('/api/admin/stop-job', { method: 'POST' }); await loadAdminStatus(); } catch (e) {} }
+
+    // =========================================================================
+    // INICIALIZAÇÃO
+    // =========================================================================
     window.addEventListener('DOMContentLoaded', () => {
-      initMap();
-      loadNeighborhoods();
+      renderCategories();
+      ['store-layer', 'neigh-layer', 'lojista-layer'].forEach(enableSwipeToClose);
       loadStats();
+      loadNeighborhoods();
       executeSearch();
-      // Permite abrir o painel direto pela URL ?painel=1
-      if (window.location.search.includes('painel=1')) {
-        toggleModalAdmin();
-      }
+      if (location.search.includes('painel=1')) toggleModalAdmin();
     });
   </script>
 </body>

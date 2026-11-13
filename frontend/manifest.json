@@ -1,0 +1,18 @@
+{
+  "name": "CompraRibeirão — Comércio Físico de Ribeirão Preto",
+  "short_name": "CompraRibeirão",
+  "description": "Descubra quais lojas físicas de Ribeirão Preto vendem ou consertam o que você precisa hoje. Distância, rota GPS e WhatsApp direto.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#1d4ed8",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

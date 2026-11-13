@@ -50,7 +50,24 @@ sys.path.append(ROOT_DIR)
 
 from database import db_transaction, PUBLIC_DB_PATH, RAW_DB_PATH
 from build_knowledge_base import NEIGHBORHOOD_COORDS, CITY_CENTROID
-from run_pipeline import get_system_diagnostics
+
+
+def get_system_diagnostics() -> dict:
+    """
+    Importa o diagnóstico do orquestrador apenas quando o Painel de Controle é aberto.
+    Assim a API pública na nuvem não carrega Playwright/crawlers na inicialização
+    (menos RAM e boot mais rápido no Render).
+    """
+    try:
+        from run_pipeline import get_system_diagnostics as _diag
+        return _diag()
+    except Exception as e:
+        return {
+            "raw_db_exists": os.path.exists(RAW_DB_PATH),
+            "public_db_exists": os.path.exists(PUBLIC_DB_PATH),
+            "public_db_size_mb": round(os.path.getsize(PUBLIC_DB_PATH) / (1024 * 1024), 2) if os.path.exists(PUBLIC_DB_PATH) else 0,
+            "error": str(e),
+        }
 
 app = FastAPI(title="CompraRibeirão - Inteligência Comercial Local", version="2.5.0")
 
