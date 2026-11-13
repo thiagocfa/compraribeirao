@@ -774,22 +774,11 @@
       mapInstance = L.map('main-map', { zoomControl: false }).setView(CITY_CENTER, 13);
       L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
 
-      let fallbackActivated = false;
-      const primaryLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        subdomains: 'abcd',
+      // Azulejos oficiais OpenStreetMap (100% gratuitos, sem API Key em produção ou local)
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        attribution: '&copy; OpenStreetMap &copy; CARTO'
+        attribution: '&copy; OpenStreetMap contributors'
       }).addTo(mapInstance);
-
-      primaryLayer.on('tileerror', () => {
-        if (!fallbackActivated) {
-          fallbackActivated = true;
-          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap'
-          }).addTo(mapInstance);
-        }
-      });
 
       mapMarkersLayer = L.layerGroup().addTo(mapInstance);
       mapInstance.on('click', () => {
