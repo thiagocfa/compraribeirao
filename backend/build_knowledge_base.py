@@ -398,6 +398,42 @@ def build_knowledge_base():
     )
     """)
 
+    # Criar tabela pública leve de produtos físicos locais (v3.0)
+    pub_c.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        store_name TEXT NOT NULL,
+        neighborhood TEXT,
+        whatsapp TEXT,
+        latitude REAL,
+        longitude REAL,
+        title TEXT NOT NULL,
+        price REAL DEFAULT 0,
+        brand TEXT,
+        category TEXT,
+        image_url TEXT,
+        product_url TEXT,
+        source_type TEXT DEFAULT 'crawler',
+        is_sponsored INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # Criar índice FTS5 rápido de produtos usando content='products' (não duplica texto no disco!)
+    pub_c.execute("""
+    CREATE VIRTUAL TABLE IF NOT EXISTS products_search_fts USING fts5(
+        title,
+        brand,
+        category,
+        store_name,
+        neighborhood,
+        content='products',
+        content_rowid='rowid',
+        tokenize = 'unicode61 remove_diacritics 2'
+    )
+    """)
+
     # Copiar banners
     banners = raw_c.execute("SELECT title, sponsor_name, image_url, target_url, position, active FROM ad_banners").fetchall()
     for b in banners:
@@ -415,6 +451,8 @@ def build_knowledge_base():
     print(f"Processando {len(stores)} lojas de Ribeirão Preto...")
 
     total_inserted = 0
+    total_public_products = 0
+    global_seen_product_keys = set()
 
     for store in stores:
         store_id = store["id"]
@@ -454,11 +492,12 @@ def build_knowledge_base():
                 dx, dy = get_jitter(store_id, scale=0.012)
                 lat, lng = CITY_CENTROID[0] + dx, CITY_CENTROID[1] + dy
 
-        # Analisar produtos da loja no banco bruto
+        # Analisar produtos da loja no banco bruto (priorizando itens com foto e preço > 0 ou fotos manuais)
         products = raw_c.execute("""
-            SELECT title, category, brand, price, product_url, image_url
+            SELECT id, title, category, brand, price, product_url, image_url, source_type
             FROM products
             WHERE store_id = ?
+            ORDER BY CASE WHEN source_type = 'manual_photo' THEN 0 WHEN price > 0 AND image_url != '' THEN 1 ELSE 2 END ASC
         """, (store_id,)).fetchall()
 
         product_count = len(products)
@@ -613,22 +652,96 @@ def build_knowledge_base():
             neighborhood, f"{top_categories_str} {specialties_str}", top_brands_str, keywords_str, ai_summary
         ))
 
+        # Inserir produtos selecionados da loja na tabela pública 'products' e no índice 'products_search_fts'
+        if has_catalog:
+            manual_items = [p for p in products if (p["source_type"] or "") == "manual_photo"]
+            crawler_items = [p for p in products if (p["source_type"] or "") != "manual_photo" and (p["price"] or 0) > 0]
+
+            # Prioriza itens de alta procura comercial antes da amostragem uniforme
+            priority_terms = (
+                "furadeira", "parafusadeira", "parafuso", "sextavado", "makita", "bosch", "dewalt",
+                "bateria", "moura", "heliar", "tinta", "suvinil", "coral", "porcelanato", "piso",
+                "argamassa", "cimento", "torneira", "chuveiro", "lorenzetti", "deca", "tigre",
+                "disjuntor", "lampada", "cabo", "fechadura", "cadeado", "camera", "alarme",
+                "pneu", "oleo", "amortecedor", "embreagem", "pastilha", "freio", "colchao",
+                "cama", "sofa", "cortina", "persiana", "racao", "piscina", "cloro", "bomba",
+                "violao", "guitarra", "bicicleta", "capacete", "oculos", "lente", "notebook",
+                "celular", "iphone", "impressora", "cadeira", "mesa", "serra", "esmerilhadeira",
+                "compressor", " escada", "chave", "alicate", "martelo", "verniz", "impermeabilizante"
+            )
+            high_demand = []
+            rest_items = []
+            for item in crawler_items:
+                t_norm = strip_accents((item["title"] or "").lower())
+                if any(pt in t_norm for pt in priority_terms):
+                    high_demand.append(item)
+                else:
+                    rest_items.append(item)
+
+            hd_step = max(1, len(high_demand) // 300)
+            picked_hd = high_demand[::hd_step][:300]
+            rem_slots = max(50, 480 - len(picked_hd))
+            r_step = max(1, len(rest_items) // rem_slots)
+            picked_rest = rest_items[::r_step][:rem_slots]
+
+            selected_products = manual_items + picked_hd + picked_rest
+
+            for p in selected_products:
+                p_title = (p["title"] or "").strip()
+                if len(p_title) < 3:
+                    continue
+                p_source = p["source_type"] or "crawler"
+                # Deduplica títulos idênticos entre filiais da mesma rede (exceto fotos manuais)
+                dedup_key = strip_accents(p_title.lower())[:50]
+                if p_source != "manual_photo" and dedup_key in global_seen_product_keys:
+                    continue
+                global_seen_product_keys.add(dedup_key)
+
+                p_id = p["id"]
+                p_price = float(p["price"] or 0.0)
+                p_brand = (p["brand"] or "").strip()
+                if p_brand.lower() == store_id.lower():
+                    p_brand = top_brands_list[0] if top_brands_list else ""
+                p_cat = (p["category"] or subcategory or macro_category or "Comércio Local").strip()
+                p_img = (p["image_url"] or "").strip()
+                p_url = (p["product_url"] or website or "").strip()
+
+                pub_c.execute("""
+                INSERT OR REPLACE INTO products (
+                    id, store_id, store_name, neighborhood, whatsapp, latitude, longitude,
+                    title, price, brand, category, image_url, product_url, source_type, is_sponsored
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    p_id, store_id, store_name, neighborhood, whatsapp, lat, lng,
+                    p_title[:160], p_price, p_brand[:60], p_cat[:80], p_img, p_url, p_source, is_sponsored
+                ))
+                total_public_products += 1
+
         total_inserted += 1
 
     pub_c.execute("CREATE INDEX IF NOT EXISTS idx_stores_neighborhood ON stores(neighborhood);")
     pub_c.execute("CREATE INDEX IF NOT EXISTS idx_stores_sponsored ON stores(is_sponsored);")
     pub_c.execute("CREATE INDEX IF NOT EXISTS idx_stores_has_catalog ON stores(has_catalog);")
     pub_c.execute("CREATE INDEX IF NOT EXISTS idx_leads_store ON lead_clicks(store_id);")
+    pub_c.execute("CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);")
+    pub_c.execute("CREATE INDEX IF NOT EXISTS idx_products_neigh ON products(neighborhood);")
+    pub_c.execute("CREATE INDEX IF NOT EXISTS idx_products_source ON products(source_type);")
 
     pub_conn.commit()
+    # Popula e otimiza os índices FTS5
+    pub_c.execute("INSERT INTO products_search_fts(products_search_fts) VALUES('rebuild');")
     pub_c.execute("INSERT INTO stores_search_fts(stores_search_fts) VALUES('optimize');")
+    pub_c.execute("INSERT INTO products_search_fts(products_search_fts) VALUES('optimize');")
+    pub_conn.commit()
+    pub_conn.execute("PRAGMA journal_mode=DELETE;")
+    pub_conn.execute("VACUUM;")
     pub_conn.commit()
 
     raw_conn.close()
     pub_conn.close()
 
     file_size_mb = os.path.getsize(PUBLIC_DB_PATH) / (1024 * 1024)
-    print(f"\nSucesso absoluto! {total_inserted} lojas sintetizadas com higienização completa.")
+    print(f"\nSucesso absoluto! {total_inserted} lojas e {total_public_products} produtos locais compilados.")
     print(f"Banco leve gerado: {PUBLIC_DB_PATH} ({file_size_mb:.2f} MB)")
 
 if __name__ == "__main__":

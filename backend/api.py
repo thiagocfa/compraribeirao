@@ -297,12 +297,19 @@ def get_stats():
         except Exception:
             with_catalog = 0
 
+        try:
+            c.execute("SELECT COUNT(*) FROM products")
+            total_products = c.fetchone()[0]
+        except Exception:
+            total_products = 0
+
         result = {
             "stores_count": total_stores,
             "neighborhoods_count": total_neighborhoods,
             "catalog_stores_count": with_catalog,
+            "products_count": total_products,
             "city": "Ribeirão Preto - SP",
-            "version": "2.5-intel"
+            "version": "3.0-local-products"
         }
         set_in_cache("stats_v25", result)
         return result
@@ -581,11 +588,11 @@ def local_search(
                     else:
                         sp["is_direct_match"] = False
                         other_samples.append(sp)
-                r["sample_products"] = (matching_samples + other_samples[:2])[:3] if matching_samples else other_samples[:3]
+                r["sample_products"] = (matching_samples + other_samples[:8])[:10] if matching_samples else other_samples[:10]
                 if matching_samples:
                     match_reasons.insert(0, "Item encontrado no catálogo da loja")
             else:
-                r["sample_products"] = raw_samples[:3]
+                r["sample_products"] = raw_samples[:10]
 
             phone = r.get("whatsapp") or ""
             r["whatsapp_url"] = format_whatsapp_url(phone, r.get("name", "Loja"), q)
@@ -682,6 +689,390 @@ def get_stores():
         rows = [dict(r) for r in c.fetchall()]
         set_in_cache("all_stores_simple_v25", rows)
         return rows
+
+
+# ==============================================================================
+# 3B. BUSCA DE PRODUTOS DE LOJAS FÍSICAS + CADASTRO POR FOTO (v3.0)
+# ==============================================================================
+@app.get("/api/products-search")
+def products_search(
+    q: Optional[str] = Query(None, description="Nome do produto, marca ou categoria"),
+    neighborhood: Optional[str] = Query(None, description="Filtrar ou priorizar bairro"),
+    user_lat: Optional[float] = Query(None),
+    user_lng: Optional[float] = Query(None),
+    store_id: Optional[str] = Query(None, description="Filtrar produtos de uma loja específica"),
+    limit: int = 36,
+    offset: int = 0
+):
+    """
+    Motor de Busca Rápido de Produtos em Lojas Físicas de Ribeirão Preto (< 5ms):
+    - Consulta a tabela pública 'products' e o índice FTS5 'products_search_fts'.
+    - Prioriza produtos cadastrados por foto ('manual_photo'), match exato das palavras
+      buscadas no título do produto, proximidade física (GPS ou bairro) e diversidade de lojas.
+    """
+    lat_key = f"{user_lat:.3f}_{user_lng:.3f}" if (user_lat is not None and user_lng is not None) else "none"
+    cache_key = f"prod_search_v30_{q}_{neighborhood}_{lat_key}_{store_id}_{limit}_{offset}"
+    cached = get_from_cache(cache_key, ttl_seconds=120)
+    if cached:
+        return cached
+
+    ref_lat, ref_lng = user_lat, user_lng
+    clean_neigh = neighborhood.strip() if neighborhood else ""
+    if (ref_lat is None or ref_lng is None) and clean_neigh:
+        neigh_norm = strip_accents(clean_neigh.lower())
+        for k, coords in NEIGHBORHOOD_COORDS.items():
+            if strip_accents(k) == neigh_norm or strip_accents(k) in neigh_norm:
+                ref_lat, ref_lng = coords[0], coords[1]
+                break
+
+    has_query = bool(q and q.strip())
+    core_words, expanded_words = expand_search_query(q.strip()) if has_query else ([], [])
+    core_stems = [stem_pt(w) for w in core_words if len(w) >= 2]
+
+    with db_transaction(PUBLIC_DB_PATH) as conn:
+        c = conn.cursor()
+
+        if store_id:
+            c.execute("SELECT *, 0.0 as fts_score FROM products WHERE store_id = ? LIMIT 300", (store_id,))
+            rows = [dict(r) for r in c.fetchall()]
+        elif has_query:
+            fts_terms = []
+            for w in expanded_words:
+                w_clean = re.sub(r"[^a-zA-Z0-9]", "", w)
+                if len(w_clean) >= 2:
+                    fts_terms.append(f'"{w_clean}"*')
+            fts_query = " OR ".join(dict.fromkeys(fts_terms)) if fts_terms else f'"{q.strip()}"*'
+
+            sql = """
+            SELECT p.*, bm25(products_search_fts, 12.0, 8.0, 5.0, 4.0, 2.0) as fts_score
+            FROM products_search_fts
+            JOIN products p ON products_search_fts.rowid = p.rowid
+            WHERE products_search_fts MATCH ?
+            LIMIT 600
+            """
+            try:
+                c.execute(sql, (fts_query,))
+                rows = [dict(r) for r in c.fetchall()]
+            except Exception:
+                rows = []
+        else:
+            # Sem termo de busca: traz vitrine diversificada de produtos de lojas de Ribeirão
+            if clean_neigh:
+                c.execute("""
+                    SELECT *, 0.0 as fts_score FROM products
+                    WHERE neighborhood = ? AND image_url != ''
+                    ORDER BY CASE WHEN source_type = 'manual_photo' THEN 0 ELSE 1 END, is_sponsored DESC
+                    LIMIT 400
+                """, (clean_neigh,))
+            else:
+                c.execute("""
+                    SELECT *, 0.0 as fts_score FROM products
+                    WHERE image_url != ''
+                    ORDER BY CASE WHEN source_type = 'manual_photo' THEN 0 ELSE 1 END, is_sponsored DESC
+                    LIMIT 600
+                """)
+            rows = [dict(r) for r in c.fetchall()]
+
+        scored_products = []
+        per_store_counter: Dict[str, int] = {}
+
+        for p in rows:
+            p_Neigh = p.get("neighborhood") or "Ribeirão Preto"
+            in_neigh = (clean_neigh.lower() == p_Neigh.lower()) if clean_neigh else True
+
+            dist_km = None
+            lat = p.get("latitude")
+            lng = p.get("longitude")
+            if ref_lat is not None and ref_lng is not None and lat and lng:
+                dist_km = round(haversine_km(ref_lat, ref_lng, float(lat), float(lng)), 1)
+
+            if clean_neigh and not in_neigh:
+                if dist_km is None or dist_km > 5.0:
+                    continue
+
+            title_norm = strip_accents((p.get("title") or "").lower())
+            brand_norm = strip_accents((p.get("brand") or "").lower())
+            cat_norm = strip_accents((p.get("category") or "").lower())
+            blob = f"{title_norm} {brand_norm} {cat_norm}"
+
+            match_tier = 1
+            if has_query and core_stems:
+                title_matches = sum(1 for st in core_stems if st in title_norm or st in brand_norm)
+                blob_matches = sum(1 for st in core_stems if st in blob)
+                if title_matches == len(core_stems):
+                    match_tier = 1
+                elif blob_matches == len(core_stems) or title_matches > 0:
+                    match_tier = 2
+                else:
+                    match_tier = 3
+
+            p["distance_km"] = dist_km
+            p["in_selected_neighborhood"] = in_neigh
+            p["match_tier"] = match_tier
+            p["whatsapp_url"] = format_whatsapp_url(
+                p.get("whatsapp") or "",
+                p.get("store_name") or "Loja",
+                p.get("title") or q
+            )
+            scored_products.append(p)
+
+        # Se há muitos produtos Tier 1 exatos, descarta ruído Tier 3
+        t1_count = sum(1 for item in scored_products if item["match_tier"] == 1)
+        if has_query and t1_count >= 6:
+            scored_products = [item for item in scored_products if item["match_tier"] in (1, 2)]
+
+        # Ordena priorizando: Bairro selecionado -> Fotos manuais / Tier -> Menor distância -> Score FTS
+        def prod_sort_key(item):
+            in_neigh_rank = 0 if item["in_selected_neighborhood"] else 1
+            manual_rank = 0 if item.get("source_type") == "manual_photo" else 1
+            tier_rank = item["match_tier"]
+            has_img_rank = 0 if item.get("image_url") else 1
+            dist_val = item["distance_km"] if item["distance_km"] is not None else 999.0
+            fts_val = float(item.get("fts_score") or 0.0)
+            return (in_neigh_rank, tier_rank, manual_rank, has_img_rank, round(dist_val, 0), fts_val)
+
+        scored_products.sort(key=prod_sort_key)
+
+        # Garante diversidade entre lojas na vitrine (evita mostrar 30 itens seguidos da mesma loja)
+        diversified = []
+        overflow = []
+        max_per_store_first_pass = 4 if not has_query else 8
+        for item in scored_products:
+            sid = item.get("store_id") or ""
+            cnt = per_store_counter.get(sid, 0)
+            if cnt < max_per_store_first_pass or store_id:
+                per_store_counter[sid] = cnt + 1
+                diversified.append(item)
+            else:
+                overflow.append(item)
+
+        final_list = diversified + overflow
+        total_found = len(final_list)
+        paginated = final_list[offset : offset + limit]
+
+        payload = {
+            "query": q,
+            "neighborhood": neighborhood,
+            "total": total_found,
+            "count": len(paginated),
+            "products": paginated
+        }
+        set_in_cache(cache_key, payload)
+        return payload
+
+
+@app.get("/api/store/{store_id}/products")
+def get_store_products(store_id: str, q: Optional[str] = None, limit: int = 24):
+    """
+    Retorna a relação de produtos de uma loja específica para o Carrossel do Mapa
+    e para a Ficha da Loja.
+    """
+    with db_transaction(PUBLIC_DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM stores WHERE id = ?", (store_id,))
+        store_row = c.fetchone()
+        if not store_row:
+            raise HTTPException(status_code=404, detail="Loja não encontrada")
+        store = dict(store_row)
+
+        c.execute("""
+            SELECT * FROM products
+            WHERE store_id = ?
+            ORDER BY CASE WHEN source_type = 'manual_photo' THEN 0 WHEN image_url != '' THEN 1 ELSE 2 END, price DESC
+            LIMIT ?
+        """, (store_id, limit))
+        prods = [dict(r) for r in c.fetchall()]
+
+        # Se a busca atual tiver um termo, coloca primeiro os produtos da loja que batem com o termo
+        if q and q.strip() and prods:
+            stems = [stem_pt(w) for w in expand_search_query(q.strip())[0] if len(w) >= 2]
+            if stems:
+                prods.sort(key=lambda p: 0 if any(st in strip_accents((p.get("title") or "").lower()) for st in stems) else 1)
+
+        for p in prods:
+            p["whatsapp_url"] = format_whatsapp_url(
+                store.get("whatsapp") or "",
+                store.get("name") or "Loja",
+                p.get("title")
+            )
+
+        return {
+            "store_id": store_id,
+            "store_name": store.get("name"),
+            "neighborhood": store.get("neighborhood"),
+            "products": prods
+        }
+
+
+class ManualProductPayload(BaseModel):
+    store_id: str  # ID de loja existente ou '__new__' para cadastrar nova loja física sem site
+    new_store_name: Optional[str] = ""
+    new_store_neighborhood: Optional[str] = ""
+    new_store_address: Optional[str] = ""
+    new_store_whatsapp: Optional[str] = ""
+    new_store_category: Optional[str] = "Comércio Local"
+    title: str
+    price: Optional[float] = 0.0
+    brand: Optional[str] = ""
+    category: Optional[str] = "Comércio Local"
+    image_data_url: Optional[str] = ""
+
+
+@app.post("/api/manual-product")
+def create_manual_product(payload: ManualProductPayload):
+    """
+    Cadastra rapidamente um produto fotografado em uma loja física de Ribeirão Preto
+    (inclusive lojas sem site que só existem no bairro/Google Maps) e já o indexa
+    instantaneamente no motor de busca e no mapa!
+    """
+    title_clean = (payload.title or "").strip()
+    if len(title_clean) < 2:
+        raise HTTPException(status_code=400, detail="Informe o nome do produto.")
+
+    store_id = (payload.store_id or "").strip()
+
+    with db_transaction(PUBLIC_DB_PATH) as conn:
+        c = conn.cursor()
+
+        # 1. Verifica se é uma loja nova sendo cadastrada na hora ou uma loja existente
+        if store_id == "__new__" or not store_id:
+            s_name = (payload.new_store_name or "").strip()
+            if len(s_name) < 2:
+                raise HTTPException(status_code=400, detail="Informe o nome da loja física.")
+            slug = re.sub(r"[^\w\s-]", "", strip_accents(s_name.lower()))
+            slug = re.sub(r"[\s_-]+", "-", slug).strip("-") or f"loja-{int(time.time())}"
+            store_id = slug
+            s_neigh = (payload.new_store_neighborhood or "Centro").strip()
+            s_addr = (payload.new_store_address or f"{s_neigh}, Ribeirão Preto - SP").strip()
+            s_whats = re.sub(r"\D", "", payload.new_store_whatsapp or "")
+            if s_whats and not s_whats.startswith("55"):
+                s_whats = "55" + s_whats
+            s_cat = (payload.new_store_category or payload.category or "Comércio Local").strip()
+
+            # Coordenada aproximada pelo centroide do bairro
+            lat, lng = CITY_CENTROID[0], CITY_CENTROID[1]
+            neigh_norm = strip_accents(s_neigh.lower())
+            for k, coords in NEIGHBORHOOD_COORDS.items():
+                if strip_accents(k) == neigh_norm or strip_accents(k) in neigh_norm:
+                    lat, lng = coords[0], coords[1]
+                    break
+
+            c.execute("""
+            INSERT INTO stores (
+                id, name, slug, category, macro_category, subcategory, neighborhood, address,
+                city, state, whatsapp, website, logo_url, latitude, longitude, is_sponsored,
+                has_catalog, product_count, top_categories, top_brands, specialties, keywords,
+                ai_summary, sample_products
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Ribeirão Preto', 'SP', ?, '', '', ?, ?, 0, 1, 0, ?, ?, ?, ?, ?, '[]')
+            ON CONFLICT(id) DO NOTHING
+            """, (
+                store_id, s_name, slug, s_cat, s_cat, s_cat, s_neigh, s_addr,
+                s_whats, lat, lng, s_cat, payload.brand or "", title_clean,
+                f"{s_name.lower()}, {title_clean.lower()}, {s_cat.lower()}",
+                f"Loja física localizada no bairro {s_neigh} em Ribeirão Preto."
+            ))
+
+        c.execute("SELECT * FROM stores WHERE id = ?", (store_id,))
+        store_row = c.fetchone()
+        if not store_row:
+            raise HTTPException(status_code=404, detail="Loja selecionada não encontrada.")
+        store = dict(store_row)
+
+        # 2. Cria e indexa o novo produto fotografado
+        prod_id = f"{store_id}_photo_{int(time.time() * 1000)}"
+        price_val = float(payload.price or 0.0)
+        brand_val = (payload.brand or "").strip()
+        cat_val = (payload.category or store.get("subcategory") or "Comércio Local").strip()
+        img_val = (payload.image_data_url or "").strip()
+
+        c.execute("""
+        INSERT INTO products (
+            id, store_id, store_name, neighborhood, whatsapp, latitude, longitude,
+            title, price, brand, category, image_url, product_url, source_type, is_sponsored
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'manual_photo', ?)
+        """, (
+            prod_id, store_id, store["name"], store["neighborhood"], store.get("whatsapp") or "",
+            store.get("latitude"), store.get("longitude"), title_clean, price_val,
+            brand_val, cat_val, img_val, store.get("is_sponsored") or 0
+        ))
+        new_rowid = c.lastrowid
+
+        c.execute("""
+        INSERT INTO products_search_fts (
+            rowid, title, brand, category, store_name, neighborhood
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            new_rowid, title_clean, brand_val, cat_val, store["name"], store["neighborhood"]
+        ))
+
+        # 3. Atualiza os produtos de amostra e palavras-chave da própria loja para aparecer no Mapa na hora
+        samples = []
+        if store.get("sample_products"):
+            try:
+                samples = json.loads(store["sample_products"])
+            except Exception:
+                samples = []
+        samples.insert(0, {
+            "title": title_clean,
+            "price": price_val if price_val > 0 else None,
+            "url": "",
+            "image": img_val if img_val else None
+        })
+        new_kw = f"{title_clean.lower()}, {brand_val.lower()}, {store.get('keywords') or ''}".strip(", ")
+
+        c.execute("""
+        UPDATE stores
+        SET has_catalog = 1,
+            product_count = COALESCE(product_count, 0) + 1,
+            sample_products = ?,
+            keywords = ?
+        WHERE id = ?
+        """, (json.dumps(samples[:16], ensure_ascii=False), new_kw[:2500], store_id))
+
+        c.execute("""
+        INSERT INTO stores_search_fts (
+            store_id, name, category, neighborhood, top_categories, top_brands, keywords, ai_summary
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            store_id, store["name"], store.get("category") or "", store.get("neighborhood") or "",
+            store.get("top_categories") or "", f"{brand_val} {store.get('top_brands') or ''}",
+            title_clean.lower(), store.get("ai_summary") or ""
+        ))
+
+    # 4. Se estivermos no PC Local (onde 'compraribeirao.db' existe), salva também no banco bruto permanente!
+    if os.path.exists(RAW_DB_PATH):
+        try:
+            with db_transaction(RAW_DB_PATH) as raw_conn:
+                rc = raw_conn.cursor()
+                rc.execute("""
+                INSERT INTO stores (id, name, slug, category, neighborhood, address, city, state, whatsapp, website, platform)
+                VALUES (?, ?, ?, ?, ?, ?, 'Ribeirão Preto', 'SP', ?, ?, 'manual_photo')
+                ON CONFLICT(id) DO NOTHING
+                """, (
+                    store_id, store["name"], store["slug"], store.get("category") or "Comércio Local",
+                    store["neighborhood"], store.get("address") or "Ribeirão Preto - SP",
+                    store.get("whatsapp") or "", store.get("website") or ""
+                ))
+                rc.execute("""
+                INSERT INTO products (
+                    id, store_id, title, description, price, original_price,
+                    category, brand, image_url, product_url, in_stock, source_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 1, 'manual_photo')
+                """, (
+                    prod_id, store_id, title_clean, title_clean, price_val, price_val,
+                    cat_val, brand_val, img_val
+                ))
+        except Exception as e:
+            print(f"[Aviso] Não foi possível espelhar no banco bruto: {e}")
+
+    clear_all_cache()
+    return {
+        "status": "ok",
+        "product_id": prod_id,
+        "store_id": store_id,
+        "store_name": store["name"],
+        "neighborhood": store["neighborhood"]
+    }
 
 
 # ==============================================================================
